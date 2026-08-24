@@ -1,0 +1,80 @@
+/**
+ * Media provider abstraction — the seam between the SudoMeet call UI and the
+ * underlying media engine.
+ *
+ * Tier A implements this with `P2PMediaProvider` (simple-peer mesh, ≤4 people).
+ * Tier B implements it with `LiveKitMediaProvider` (LiveKit SFU). The UI, call
+ * store, chat, participants panel and layouts depend ONLY on these types and
+ * must survive the provider swap unchanged.
+ *
+ * See docs/adr/ADR-001-media-provider-abstraction.md and
+ * docs/adr/ADR-004-tier-a-p2p-vs-tier-b-livekit.md.
+ */
+
+/** A single track whose state changed inside a call. */
+export type MediaTrackKind = "audio" | "video" | "screen";
+
+/** What happened to the track. */
+export type MediaTrackChangeKind = "enabled" | "disabled" | "started" | "stopped";
+
+/** Payload for `onTrackChanged` subscribers. */
+export interface TrackChangedEvent {
+  participantId: string;
+  track: MediaTrackKind;
+  change: MediaTrackChangeKind;
+}
+
+/**
+ * Placeholder participant model (Phase 1).
+ * Phases 7/11 extend this with connection quality, joined-at, permissions, etc.
+ */
+export interface CallParticipant {
+  /** Stable id for the participant within the call (local or remote). */
+  id: string;
+  /** Display name shown on the tile. */
+  name: string;
+  /** True for the local user's own participant entry. */
+  isLocal: boolean;
+  isMicrophoneEnabled: boolean;
+  isCameraEnabled: boolean;
+  isScreenSharing: boolean;
+}
+
+export type ParticipantCallback = (participant: CallParticipant) => void;
+export type TrackChangedCallback = (event: TrackChangedEvent) => void;
+
+/**
+ * The contract every media engine must fulfill. The call UI talks exclusively
+ * to this interface — never to simple-peer or livekit-client directly.
+ */
+export interface MediaProvider {
+  /** Join the call room and establish the underlying connections. */
+  connect(): Promise<void>;
+
+  /** Leave the call room and release all media resources. */
+  disconnect(): Promise<void>;
+
+  /** Mute/unmute the local microphone. */
+  setMicrophoneEnabled(enabled: boolean): Promise<void>;
+
+  /** Turn the local camera on/off. */
+  setCameraEnabled(enabled: boolean): Promise<void>;
+
+  /** Begin sharing the local screen. */
+  startScreenShare(): Promise<void>;
+
+  /** Stop sharing the local screen. */
+  stopScreenShare(): Promise<void>;
+
+  /** Snapshot of everyone currently in the call. */
+  getParticipants(): CallParticipant[];
+
+  /** Subscribe to remote/local participants joining. Returns unsubscribe fn. */
+  onParticipantJoined(callback: ParticipantCallback): () => void;
+
+  /** Subscribe to participants leaving. Returns unsubscribe fn. */
+  onParticipantLeft(callback: ParticipantCallback): () => void;
+
+  /** Subscribe to track state changes (mic/camera/screen). Returns unsubscribe fn. */
+  onTrackChanged(callback: TrackChangedCallback): () => void;
+}
