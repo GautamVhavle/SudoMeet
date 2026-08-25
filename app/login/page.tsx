@@ -8,9 +8,8 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Sign in" };
 
 /**
- * Minimal sign-in page (Phase 3). Visual polish is Phase 5 — this stays
- * functional: dark-first, GitHub button + magic-link form, and a signed-in
- * state with sign-out so the exit criteria are demonstrable.
+ * Sign-in page (Phase 5: design system applied).
+ * Dark-first, GitHub button + magic-link form, signed-in state with sign-out.
  */
 export default async function LoginPage() {
   const session = await auth();
@@ -18,7 +17,7 @@ export default async function LoginPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm rounded-xl border border-border bg-card p-8 shadow-lg">
+      <div className="w-full max-w-sm rounded-xl border border-border bg-background-elevated p-8 shadow-lg">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           Sign in to SudoMeet
         </h1>
@@ -30,7 +29,7 @@ export default async function LoginPage() {
           <div className="mt-6 space-y-4">
             <p className="text-sm text-foreground">
               Signed in as{" "}
-              <span className="font-medium">
+              <span className="font-medium font-mono text-accent">
                 {session.user?.email ?? session.user?.name ?? "a user"}
               </span>
             </p>

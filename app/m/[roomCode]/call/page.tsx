@@ -1,55 +1,166 @@
-import Link from "next/link";
-import { notFound } from "next/navigation";
+"use client";
 
-import { roomCodeSchema } from "@/lib/validation/meetings";
-import { findMeetingByRoomCode } from "@/features/meetings/service";
-
-export { dynamic } from "@/app/dynamic-exports";
+import * as React from "react";
+import { useParams, useRouter } from "next/navigation";
+import { VideoGrid } from "@/components/call/video-grid";
+import { CallControlBar } from "@/components/call/call-control-bar";
+import { ParticipantPanel } from "@/components/call/participant-panel";
+import { ChatPanel } from "@/components/call/chat-panel";
+import { ConnectionIndicator } from "@/components/call/connection-indicator";
+import { StatsOverlay } from "@/components/call/stats-overlay";
+import { ReactionLayer } from "@/components/call/reaction-layer";
 
 /**
- * /m/[roomCode]/call — placeholder call screen (Phase 4).
- * Real call UI + media provider wiring arrives in Phases 7–10.
+ * /m/[roomCode]/call — Full call UI with MOCK DATA (Phase 5).
+ * Real media provider wiring arrives in Phases 6-7.
  */
 
-interface PageProps {
-  params: Promise<{ roomCode: string }>;
-}
+export default function CallPage() {
+  const params = useParams();
+  const router = useRouter();
+  const [isMuted, setIsMuted] = React.useState(false);
+  const [isVideoOff, setIsVideoOff] = React.useState(false);
+  const [isScreenSharing, setIsScreenSharing] = React.useState(false);
+  const [showChat, setShowChat] = React.useState(false);
+  const [showParticipants, setShowParticipants] = React.useState(false);
+  const [showStats, setShowStats] = React.useState(false);
 
-export default async function CallPlaceholderPage({ params }: PageProps) {
-  const { roomCode } = await params;
-  const parsed = roomCodeSchema.safeParse(roomCode);
+  // Mock participants data (Phase 5)
+  const mockParticipants = [
+    {
+      id: "1",
+      name: "You",
+      avatarUrl: undefined,
+      isSpeaking: false,
+      isMuted: isMuted,
+      isVideoOff: isVideoOff,
+      isLocal: true,
+      srcObject: null,
+    },
+    {
+      id: "2",
+      name: "Alice Johnson",
+      avatarUrl: undefined,
+      isSpeaking: true,
+      isMuted: false,
+      isVideoOff: false,
+      isLocal: false,
+      srcObject: null,
+    },
+    {
+      id: "3",
+      name: "Bob Smith",
+      avatarUrl: undefined,
+      isSpeaking: false,
+      isMuted: true,
+      isVideoOff: false,
+      isLocal: false,
+      srcObject: null,
+    },
+  ];
 
-  if (!parsed.success) {
-    notFound();
-  }
+  // Mock chat messages
+  const mockMessages = [
+    {
+      id: "1",
+      senderId: "2",
+      senderName: "Alice Johnson",
+      message: "Hey everyone! Great to be here.",
+      timestamp: new Date(Date.now() - 300000),
+      isLocal: false,
+    },
+    {
+      id: "2",
+      senderId: "1",
+      senderName: "You",
+      message: "Hi Alice! Thanks for joining.",
+      timestamp: new Date(Date.now() - 240000),
+      isLocal: true,
+    },
+    {
+      id: "3",
+      senderId: "3",
+      senderName: "Bob Smith",
+      message: "Can you all hear me okay?",
+      timestamp: new Date(Date.now() - 120000),
+      isLocal: false,
+    },
+  ];
 
-  const meeting = await findMeetingByRoomCode(parsed.data);
-  if (!meeting) {
-    notFound();
-  }
+  // Mock call stats
+  const mockStats = {
+    bitrate: "1.2 Mbps",
+    packetLoss: "0.5%",
+    latency: "42ms",
+    resolution: "1280x720",
+    fps: 30,
+  };
 
-  // Prepare for Phase 7+: const userId = await getSessionUserId(); const isHost = userId !== null && meeting.hostId === userId;
+  // Mock reactions
+  const reactions: Array<{
+    id: string;
+    emoji: string;
+    participantId: string;
+    timestamp: Date;
+  }> = [];
+
+  const handleEndCall = () => {
+    router.push(`/m/${params.roomCode}`);
+  };
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
-      <div className="w-full max-w-lg rounded-lg border border-border bg-card p-8 text-center shadow-sm">
-        <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
-          SudoMeet · call
-        </p>
-        <h1 className="mt-2 text-xl font-semibold text-foreground">{meeting.title}</h1>
-        <p
-          data-testid="call-placeholder"
-          className="mt-4 font-mono text-sm text-muted-foreground"
-        >
-          Call UI ships in Phase 7+ (media provider: {meeting.mediaProvider}).
-        </p>
-        <Link
-          href={`/m/${meeting.roomCode}`}
-          className="mt-6 inline-flex h-9 items-center rounded-md border border-border px-4 text-sm text-foreground transition-colors hover:bg-muted"
-        >
-          Back to pre-join
-        </Link>
+    <div className="flex h-screen flex-col bg-background">
+      {/* Top bar with connection indicator and stats */}
+      <div className="absolute top-4 right-4 z-10 flex gap-2">
+        <ConnectionIndicator quality="excellent" />
       </div>
-    </main>
+
+      <StatsOverlay stats={mockStats} isVisible={showStats} />
+      
+      <ReactionLayer reactions={reactions} />
+
+      {/* Main content area */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Video grid */}
+        <div className="flex-1 relative">
+          <VideoGrid participants={mockParticipants} />
+        </div>
+
+        {/* Side panels */}
+        {showChat && (
+          <div className="w-80">
+            <ChatPanel
+              messages={mockMessages}
+              onSendMessage={(msg) => console.log("Send:", msg)}
+            />
+          </div>
+        )}
+
+        {showParticipants && (
+          <div className="w-80">
+            <ParticipantPanel
+              participants={mockParticipants}
+              onPinParticipant={(id) => console.log("Pin:", id)}
+              onRemoveParticipant={(id) => console.log("Remove:", id)}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Control bar */}
+      <CallControlBar
+        isMuted={isMuted}
+        isVideoOff={isVideoOff}
+        isScreenSharing={isScreenSharing}
+        onToggleMute={() => setIsMuted(!isMuted)}
+        onToggleVideo={() => setIsVideoOff(!isVideoOff)}
+        onToggleScreenShare={() => setIsScreenSharing(!isScreenSharing)}
+        onEndCall={handleEndCall}
+        onOpenSettings={() => setShowStats(!showStats)}
+        onToggleChat={() => setShowChat(!showChat)}
+        onToggleParticipants={() => setShowParticipants(!showParticipants)}
+      />
+    </div>
   );
 }
+

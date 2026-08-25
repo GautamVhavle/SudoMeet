@@ -5,11 +5,13 @@ import { auth } from "@/lib/auth";
 import { getOrCreatePersonalRoom, listMeetingsForUser } from "@/features/meetings/service";
 import { createQuickMeeting, joinByCodeAction } from "./actions";
 import { redirect } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 export { dynamic } from "@/app/dynamic-exports";
 
 /**
- * /dashboard — authenticated home (Phase 4).
+ * /dashboard — authenticated home (Phase 5: design system applied).
  *
  * Sections:
  * - Personal Room (stable per-user room)
@@ -43,32 +45,31 @@ export default async function DashboardPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-semibold text-foreground">Dashboard</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Welcome back, {user.name ?? user.email}
+            Welcome back, <span className="font-mono text-accent">{user.name ?? user.email}</span>
           </p>
         </div>
 
         {/* Personal Room */}
         <section
           data-testid="personal-room-section"
-          className="mb-6 rounded-lg border border-border bg-card p-6"
+          className="mb-6 rounded-xl border border-border bg-background-elevated p-6"
         >
           <div className="mb-4 flex items-center gap-2">
-            <Users className="size-5 text-muted-foreground" />
+            <Users className="size-5 text-accent" />
             <h2 className="text-lg font-medium text-foreground">Personal Room</h2>
           </div>
           <p className="mb-4 text-sm text-muted-foreground">
             Your stable room for quick calls — always the same link.
           </p>
           <div className="flex items-center gap-3">
-            <code className="flex-1 rounded border border-border bg-muted px-3 py-2 font-mono text-sm text-foreground">
+            <code className="flex-1 rounded-xl border border-border bg-background-subtle px-4 py-3 font-mono text-sm text-foreground">
               /m/{personalRoom.roomCode}
             </code>
-            <Link
-              href={`/m/${personalRoom.roomCode}`}
-              className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              Join
-            </Link>
+            <Button asChild>
+              <Link href={`/m/${personalRoom.roomCode}`}>
+                Join
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -76,31 +77,28 @@ export default async function DashboardPage() {
         <div className="mb-6 grid gap-4 md:grid-cols-2">
           <section
             data-testid="quick-start-section"
-            className="rounded-lg border border-border bg-card p-6"
+            className="rounded-xl border border-border bg-background-elevated p-6"
           >
             <div className="mb-4 flex items-center gap-2">
-              <Plus className="size-5 text-muted-foreground" />
+              <Plus className="size-5 text-accent" />
               <h2 className="text-lg font-medium text-foreground">Quick Start</h2>
             </div>
             <p className="mb-4 text-sm text-muted-foreground">
               Create an instant meeting with a new room code.
             </p>
             <form action={createQuickMeeting}>
-              <button
-                type="submit"
-                className="inline-flex h-9 items-center rounded-md border border-border bg-background px-4 text-sm font-medium text-foreground hover:bg-muted"
-              >
+              <Button type="submit" variant="secondary">
                 New Meeting
-              </button>
+              </Button>
             </form>
           </section>
 
           <section
             data-testid="join-by-code-section"
-            className="rounded-lg border border-border bg-card p-6"
+            className="rounded-xl border border-border bg-background-elevated p-6"
           >
             <div className="mb-4 flex items-center gap-2">
-              <LogIn className="size-5 text-muted-foreground" />
+              <LogIn className="size-5 text-accent" />
               <h2 className="text-lg font-medium text-foreground">Join Meeting</h2>
             </div>
             <p className="mb-4 text-sm text-muted-foreground">
@@ -113,14 +111,11 @@ export default async function DashboardPage() {
                 placeholder="room-code-here"
                 pattern="[a-z-]+"
                 required
-                className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="flex-1 h-10 rounded-xl border border-border bg-background-subtle px-4 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent"
               />
-              <button
-                type="submit"
-                className="inline-flex h-9 items-center rounded-md border border-border bg-background px-4 text-sm font-medium text-foreground hover:bg-muted"
-              >
+              <Button type="submit" variant="secondary">
                 Join
-              </button>
+              </Button>
             </form>
           </section>
         </div>
@@ -128,11 +123,11 @@ export default async function DashboardPage() {
         {/* Upcoming Meetings */}
         <section data-testid="upcoming-section" className="mb-6">
           <div className="mb-3 flex items-center gap-2">
-            <Calendar className="size-5 text-muted-foreground" />
+            <Calendar className="size-5 text-accent" />
             <h2 className="text-lg font-medium text-foreground">Upcoming</h2>
           </div>
           {upcoming.length === 0 ? (
-            <p className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+            <p className="rounded-xl border border-border bg-background-elevated p-6 text-sm text-muted-foreground">
               No upcoming meetings.
             </p>
           ) : (
@@ -140,7 +135,7 @@ export default async function DashboardPage() {
               {upcoming.map((meeting) => (
                 <li
                   key={meeting.id}
-                  className="flex items-center justify-between rounded-lg border border-border bg-card p-4"
+                  className="flex items-center justify-between rounded-xl border border-border bg-background-elevated p-4 hover:border-accent/50 transition-colors"
                 >
                   <div>
                     <p className="font-medium text-foreground">{meeting.title}</p>
@@ -148,12 +143,11 @@ export default async function DashboardPage() {
                       {meeting.roomCode}
                     </p>
                   </div>
-                  <Link
-                    href={`/m/${meeting.roomCode}`}
-                    className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                  >
-                    Join
-                  </Link>
+                  <Button asChild size="sm">
+                    <Link href={`/m/${meeting.roomCode}`}>
+                      Join
+                    </Link>
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -163,11 +157,11 @@ export default async function DashboardPage() {
         {/* Active Meetings */}
         <section data-testid="active-section" className="mb-6">
           <div className="mb-3 flex items-center gap-2">
-            <Users className="size-5 text-muted-foreground" />
+            <Users className="size-5 text-accent" />
             <h2 className="text-lg font-medium text-foreground">Active</h2>
           </div>
           {active.length === 0 ? (
-            <p className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+            <p className="rounded-xl border border-border bg-background-elevated p-6 text-sm text-muted-foreground">
               No active meetings.
             </p>
           ) : (
@@ -175,20 +169,22 @@ export default async function DashboardPage() {
               {active.map((meeting) => (
                 <li
                   key={meeting.id}
-                  className="flex items-center justify-between rounded-lg border border-border bg-card p-4"
+                  className="flex items-center justify-between rounded-xl border border-accent/50 bg-background-elevated p-4"
                 >
-                  <div>
-                    <p className="font-medium text-foreground">{meeting.title}</p>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="font-medium text-foreground">{meeting.title}</p>
+                      <Badge variant="accent" className="text-xs">Live</Badge>
+                    </div>
                     <p className="font-mono text-xs text-muted-foreground">
-                      {meeting.roomCode} · {meeting.status}
+                      {meeting.roomCode}
                     </p>
                   </div>
-                  <Link
-                    href={`/m/${meeting.roomCode}/call`}
-                    className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                  >
-                    Rejoin
-                  </Link>
+                  <Button asChild size="sm" variant="default">
+                    <Link href={`/m/${meeting.roomCode}/call`}>
+                      Rejoin
+                    </Link>
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -198,11 +194,11 @@ export default async function DashboardPage() {
         {/* Recent Meetings */}
         <section data-testid="recent-section" className="mb-6">
           <div className="mb-3 flex items-center gap-2">
-            <Clock className="size-5 text-muted-foreground" />
+            <Clock className="size-5 text-accent" />
             <h2 className="text-lg font-medium text-foreground">Recent</h2>
           </div>
           {recent.length === 0 ? (
-            <p className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+            <p className="rounded-xl border border-border bg-background-elevated p-6 text-sm text-muted-foreground">
               No recent meetings.
             </p>
           ) : (
@@ -210,7 +206,7 @@ export default async function DashboardPage() {
               {recent.map((meeting) => (
                 <li
                   key={meeting.id}
-                  className="flex items-center justify-between rounded-lg border border-border bg-card p-4"
+                  className="flex items-center justify-between rounded-xl border border-border bg-background-elevated p-4"
                 >
                   <div>
                     <p className="font-medium text-foreground">{meeting.title}</p>
