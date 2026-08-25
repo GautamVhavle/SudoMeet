@@ -6,7 +6,8 @@
 
 import { NextResponse } from "next/server";
 
-import { requireUser } from "@/lib/auth";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 import { prisma } from "@/lib/db";
 import { generateApiKey } from "@/lib/api/keys";
 
@@ -18,7 +19,9 @@ interface CreateKeyRequest {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const userId = await requireUser();
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
+  const userId = identity.id;
 
   const body = (await request.json()) as CreateKeyRequest;
 
@@ -56,7 +59,9 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 export async function GET(): Promise<Response> {
-  const userId = await requireUser();
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
+  const userId = identity.id;
 
   const keys = await prisma.apiKey.findMany({
     where: {

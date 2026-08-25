@@ -7,7 +7,8 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 
-import { requireUser } from "@/lib/auth";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 import { prisma } from "@/lib/db";
 import { WEBHOOK_EVENTS } from "@/lib/webhooks/types";
 
@@ -20,7 +21,9 @@ interface CreateWebhookRequest {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const userId = await requireUser();
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
+  const userId = identity.id;
 
   const body = (await request.json()) as CreateWebhookRequest;
 
@@ -86,7 +89,9 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 export async function GET(): Promise<Response> {
-  const userId = await requireUser();
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
+  const userId = identity.id;
 
   const endpoints = await prisma.webhookEndpoint.findMany({
     where: {

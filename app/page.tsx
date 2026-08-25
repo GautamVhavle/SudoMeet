@@ -1,18 +1,15 @@
 import Link from "next/link";
-import { Terminal, ArrowRight, LogIn, Video, Zap, Shield } from "lucide-react";
+import { Terminal, ArrowRight, Video, Zap, Shield } from "lucide-react";
 
-import { getSessionUserId } from "@/lib/auth";
 import { joinByCodeAction } from "@/app/dashboard/actions";
 import { Button } from "@/components/ui/button";
 
 export { dynamic } from "@/app/dynamic-exports";
 
 /**
- * Landing page (/) — Phase 5: design system applied.
+ * Landing page (/) — no sign-in, anonymous cookie identity.
  */
 export default async function HomePage() {
-  const userId = await getSessionUserId();
-  const isAuthenticated = userId !== null;
 
   return (
     <main className="flex min-h-screen flex-col bg-background">
@@ -68,23 +65,17 @@ export default async function HomePage() {
           </div>
         </div>
 
-        {/* Auth CTAs */}
+        {/* CTAs — no auth */}
         <div className="flex flex-col sm:flex-row gap-4 mt-8">
-          {isAuthenticated ? (
-            <Button asChild size="lg">
-              <Link href="/dashboard">
-                Go to Dashboard
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
-          ) : (
-            <Button asChild size="lg">
-              <Link href="/login">
-                <LogIn className="mr-2 h-4 w-4" />
-                Sign In
-              </Link>
-            </Button>
-          )}
+          <Button asChild size="lg">
+            <Link href="/dashboard">
+              Go to Dashboard
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Link>
+          </Button>
+          <Button asChild size="lg" variant="secondary">
+            <Link href="/dashboard">Create meeting</Link>
+          </Button>
         </div>
 
         {/* Join by code */}

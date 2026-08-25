@@ -8,7 +8,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 import { prisma } from "@/lib/db";
 import {
   createBreakoutRoom,
@@ -24,10 +25,9 @@ export async function POST(
   props: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const identity = await getOrCreateIdentity();
+    await ensureAnonymousUser(identity);
+    const userId = identity.id;
 
     const params = await props.params;
     const meetingId = params.id;
@@ -42,7 +42,7 @@ export async function POST(
       return NextResponse.json({ error: "Meeting not found" }, { status: 404 });
     }
 
-    if (meeting.hostId !== session.user.id) {
+    if (meeting.hostId !== userId) {
       return NextResponse.json(
         { error: "Only the host can create breakout rooms" },
         { status: 403 },
@@ -89,10 +89,8 @@ export async function GET(
   props: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const identity = await getOrCreateIdentity();
+    await ensureAnonymousUser(identity);
 
     const params = await props.params;
     const meetingId = params.id;

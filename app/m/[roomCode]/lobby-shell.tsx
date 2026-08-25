@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { GuestIdentity } from "@/lib/validation/auth";
 import { VideoTile } from "@/components/call/video-tile";
@@ -287,10 +286,7 @@ function LobbyWithPreview({
           </Button>
           {!userId && (
             <p className="text-center text-xs text-muted-foreground">
-              Joining as guest —{" "}
-              <Link href="/login" className="underline underline-offset-2">
-                sign in instead
-              </Link>
+              Joining as {guestIdentity?.displayName ?? "Guest"}
             </p>
           )}
         </div>

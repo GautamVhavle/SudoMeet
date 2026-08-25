@@ -11,7 +11,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 import { prisma } from "@/lib/db";
 import { getMeetingRedis } from "@/lib/redis";
 import { storeMessage, fetchMessages } from "@/lib/chat/persistence";
@@ -78,7 +79,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
  */
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
-    const session = await auth();
+    const identity = await getOrCreateIdentity();
+    await ensureAnonymousUser(identity);
     const { meetingId } = await context.params;
 
     // Verify meeting exists and is active
@@ -109,10 +111,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Determine sender identity (authenticated user or guest)
-    const userId = session?.user?.id ?? null;
-    const senderName = session?.user?.name ?? "Guest";
-    const senderImage = session?.user?.image ?? null;
+    // Determine sender identity
+    const userId = identity.id;
+    const senderName = identity.displayName;
+    const senderImage = null;
 
     // Store message in database (source of truth)
     const message = await storeMessage({

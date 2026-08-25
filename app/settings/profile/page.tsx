@@ -1,7 +1,7 @@
 import { User } from "lucide-react";
 
-import { auth } from "@/lib/auth";
-import { redirect } from "next/navigation";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 
 export { dynamic } from "@/app/dynamic-exports";
 
@@ -10,13 +10,8 @@ export { dynamic } from "@/app/dynamic-exports";
  */
 
 export default async function ProfileSettingsPage() {
-  const session = await auth();
-
-  if (!session?.user) {
-    redirect("/login");
-  }
-
-  const user = session.user;
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
 
   return (
     <main className="min-h-screen bg-background px-4 py-8">
@@ -34,15 +29,15 @@ export default async function ProfileSettingsPage() {
           <dl className="space-y-3 font-mono text-sm">
             <div className="flex justify-between">
               <dt className="text-muted-foreground">Name</dt>
-              <dd className="text-foreground">{user.name ?? "(not set)"}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-muted-foreground">Email</dt>
-              <dd className="text-foreground">{user.email ?? "(not set)"}</dd>
+              <dd className="text-foreground">{identity.displayName}</dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-muted-foreground">User ID</dt>
-              <dd className="text-foreground">{user.id}</dd>
+              <dd className="text-foreground">{identity.id}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-muted-foreground">IP Hash</dt>
+              <dd className="text-foreground">{identity.ipHash.slice(0, 16)}...</dd>
             </div>
           </dl>
         </div>

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Settings } from "lucide-react";
 
-import { requireUser } from "@/lib/auth";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 
 export { dynamic } from "@/app/dynamic-exports";
 
@@ -11,7 +12,8 @@ export { dynamic } from "@/app/dynamic-exports";
  */
 
 export default async function SettingsPage() {
-  await requireUser(); // auth required
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
 
   return (
     <main className="min-h-screen bg-background px-4 py-8">

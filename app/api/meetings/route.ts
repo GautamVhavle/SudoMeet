@@ -1,4 +1,5 @@
-import { getSessionUserId } from "@/lib/auth";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 import { parseCreateMeetingRequest } from "@/lib/validation/meetings";
 import {
   createMeeting,
@@ -13,11 +14,9 @@ export { dynamic } from "@/app/dynamic-exports";
  * cannot create meetings). Returns 201 with roomCode + joinUrl.
  */
 export async function POST(request: Request): Promise<Response> {
-  const userId = await getSessionUserId();
-
-  if (!userId) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
-  }
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
+  const userId = identity.id;
 
   let body: unknown;
   try {
@@ -56,11 +55,9 @@ export async function POST(request: Request): Promise<Response> {
  * GET /api/meetings?status=A,B — list the caller's meetings, newest first.
  */
 export async function GET(request: Request): Promise<Response> {
-  const userId = await getSessionUserId();
-
-  if (!userId) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
-  }
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
+  const userId = identity.id;
 
   const url = new URL(request.url);
   const rawStatus = url.searchParams.get("status") ?? undefined;

@@ -12,7 +12,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 import { prisma } from "@/lib/db";
 import { mintLiveKitToken } from "@/lib/media/livekit";
 import { getLiveKitEnv } from "@/lib/env";
@@ -40,9 +41,10 @@ export async function POST(request: NextRequest) {
 
     const { meetingId, participantName } = parseResult.data;
 
-    // Check authentication (allow both authenticated users and guests)
-    const session = await auth();
-    const userId = session?.user?.id;
+    // Check authentication
+    const identity = await getOrCreateIdentity();
+    await ensureAnonymousUser(identity);
+    const userId = identity.id;
 
     // Verify meeting exists and check access permissions
     const meeting = await prisma.meeting.findUnique({
@@ -105,8 +107,7 @@ export async function POST(request: NextRequest) {
     const { livekitUrl, livekitApiKey, livekitApiSecret } = getLiveKitEnv();
 
     // Determine participant identity
-    // Use userId if authenticated, otherwise generate guest identity
-    const participantIdentity = userId || `guest-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const participantIdentity = userId;
 
     // Mint token
     const token = await mintLiveKitToken({

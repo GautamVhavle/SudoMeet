@@ -6,7 +6,8 @@
 
 import { NextResponse } from "next/server";
 
-import { requireUser } from "@/lib/auth";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 import { prisma } from "@/lib/db";
 
 export { dynamic } from "@/app/dynamic-exports";
@@ -23,7 +24,9 @@ export async function PATCH(
   request: Request,
   { params }: RouteParams
 ): Promise<Response> {
-  const userId = await requireUser();
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
+  const userId = identity.id;
   const { id } = await params;
 
   const endpoint = await prisma.webhookEndpoint.findUnique({
@@ -65,7 +68,9 @@ export async function DELETE(
   _request: Request,
   { params }: RouteParams
 ): Promise<Response> {
-  const userId = await requireUser();
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
+  const userId = identity.id;
   const { id } = await params;
 
   const endpoint = await prisma.webhookEndpoint.findUnique({

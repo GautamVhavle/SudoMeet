@@ -1,38 +1,25 @@
 import Link from "next/link";
 import { Plus, LogIn, Calendar, Users, Clock } from "lucide-react";
 
-import { auth } from "@/lib/auth";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 import { getOrCreatePersonalRoom, listMeetingsForUser } from "@/features/meetings/service";
 import { createQuickMeeting, joinByCodeAction } from "./actions";
-import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 export { dynamic } from "@/app/dynamic-exports";
 
 /**
- * /dashboard — authenticated home (Phase 5: design system applied).
- *
- * Sections:
- * - Personal Room (stable per-user room)
- * - Quick Start (instant meeting)
- * - Join by code
- * - Upcoming (status SCHEDULED)
- * - Active (status ACTIVE or WAITING)
- * - Recent (status ENDED, newest first)
+ * /dashboard — no auth, anonymous identity (cookie + IP hash).
  */
 
 export default async function DashboardPage() {
-  const session = await auth();
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
 
-  if (!session?.user?.id) {
-    redirect("/login");
-  }
-
-  const user = session.user;
-
-  const personalRoom = await getOrCreatePersonalRoom(user.id);
-  const allMeetings = await listMeetingsForUser(user.id);
+  const personalRoom = await getOrCreatePersonalRoom(identity.id);
+  const allMeetings = await listMeetingsForUser(identity.id);
 
   const upcoming = allMeetings.filter((m) => m.status === "SCHEDULED");
   const active = allMeetings.filter((m) => m.status === "ACTIVE" || m.status === "WAITING");
@@ -45,7 +32,7 @@ export default async function DashboardPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-semibold text-foreground">Dashboard</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Welcome back, <span className="font-mono text-accent">{user.name ?? user.email}</span>
+            Welcome, <span className="font-mono text-accent">{identity.displayName}</span>
           </p>
         </div>
 

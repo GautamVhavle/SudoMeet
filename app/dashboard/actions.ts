@@ -5,19 +5,17 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { getSessionUserId } from "@/lib/auth";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 import { createMeeting } from "@/features/meetings/service";
 
 export async function createQuickMeeting() {
   "use server";
 
-  const userId = await getSessionUserId();
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
 
-  if (!userId) {
-    redirect("/login");
-  }
-
-  const meeting = await createMeeting(userId, {
+  const meeting = await createMeeting(identity.id, {
     title: "Quick Meeting",
     scheduled: false,
   });

@@ -1,4 +1,5 @@
-import { getSessionUserId } from "@/lib/auth";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 import { parseUpdateMeetingRequest } from "@/lib/validation/meetings";
 import {
   deleteMeeting,
@@ -32,10 +33,9 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
-  }
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
+  const userId = identity.id;
 
   const { id } = await context.params;
   try {
@@ -66,10 +66,9 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
-  }
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
+  const userId = identity.id;
 
   const { id } = await context.params;
   let body: unknown;
@@ -107,10 +106,9 @@ export async function DELETE(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
-  }
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
+  const userId = identity.id;
 
   const { id } = await context.params;
   try {

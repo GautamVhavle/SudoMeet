@@ -30,6 +30,7 @@ model User {
   email         String?   @unique
   emailVerified DateTime?
   image         String?
+  isAnonymous   Boolean   @default(false)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

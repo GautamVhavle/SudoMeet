@@ -1,4 +1,5 @@
-import { getSessionUserId } from "@/lib/auth";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 import { roomCodeSchema } from "@/lib/validation/meetings";
 import { joinByRoomCode, MeetingServiceError } from "@/features/meetings/service";
 
@@ -40,7 +41,9 @@ export async function POST(request: Request): Promise<Response> {
       ? payload.displayName.trim().slice(0, 60)
       : "Guest";
 
-  const userId = await getSessionUserId();
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
+  const userId = identity.id;
 
   try {
     const outcome = await joinByRoomCode({

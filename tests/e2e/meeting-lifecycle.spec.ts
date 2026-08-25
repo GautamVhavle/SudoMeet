@@ -20,18 +20,7 @@ test.describe("Meeting lifecycle", () => {
     // Check landing page loaded
     await expect(page.getByRole("heading", { name: /sudomeet/i })).toBeVisible();
 
-    // Navigate to login
-    const loginButton = page.getByRole("link", { name: /sign in/i });
-    await loginButton.click();
-
-    // Wait for login page
-    await expect(page).toHaveURL(/\/login/);
-
-    // For demo/test: skip OAuth and directly set auth cookie if possible
-    // In real E2E, you'd use a test OAuth provider or mock auth
-    // For now, we'll skip auth and just verify the flow exists
-
-    // Navigate to dashboard (assuming auth is bypassed or mocked)
+    // No login — go directly to dashboard (anonymous identity via cookie)
     await page.goto("/dashboard");
 
     // Check dashboard loaded

@@ -1,10 +1,10 @@
 import { notFound } from "next/navigation";
 
-import { getSessionUserId } from "@/lib/auth";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 import { roomCodeSchema } from "@/lib/validation/meetings";
 import { findMeetingByRoomCode } from "@/features/meetings/service";
 import { computeExpiry } from "@/features/meetings/lifecycle";
-import { getGuestIdentity } from "@/features/auth/guest-identity";
 import { LobbyShell } from "./lobby-shell";
 
 export { dynamic } from "@/app/dynamic-exports";
@@ -39,9 +39,11 @@ export default async function MeetingEntryPage({ params }: PageProps) {
     notFound();
   }
 
-  const userId = await getSessionUserId();
-  const guestIdentity = userId ? null : await getGuestIdentity();
-  const isHost = userId !== null && meeting.hostId === userId;
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
+  const userId = identity.id;
+  const guestIdentity = { kind: "guest" as const, guestId: identity.id, displayName: identity.displayName, createdAt: new Date().toISOString() };
+  const isHost = meeting.hostId === userId;
 
   const expiry = computeExpiry(meeting.status, meeting.expiresAt);
   const expired = expiry.expired || meeting.status === "EXPIRED";

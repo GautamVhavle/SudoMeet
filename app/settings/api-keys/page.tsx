@@ -1,4 +1,5 @@
-import { requireUser } from "@/lib/auth";
+import { getOrCreateIdentity } from "@/lib/identity";
+import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
 
 import { ApiKeysUI } from "./ui";
 
@@ -9,7 +10,8 @@ export { dynamic } from "@/app/dynamic-exports";
  */
 
 export default async function ApiKeysSettingsPage() {
-  await requireUser();
+  const identity = await getOrCreateIdentity();
+  await ensureAnonymousUser(identity);
 
   return (
     <main className="min-h-screen bg-background px-4 py-8">
