@@ -31,6 +31,8 @@ interface ChatState {
 
   // Actions
   setMessages: (messages: ChatMessage[]) => void;
+  /** Fold polled server history in without dropping in-flight sends. */
+  mergeMessages: (messages: ChatMessage[], localUserId?: string | null) => void;
   addMessage: (message: ChatMessage) => void;
   updateMessageStatus: (
     optimisticId: string,
@@ -54,6 +56,29 @@ export const useChatStore = create<ChatState>((set) => ({
   ...initialState,
 
   setMessages: (messages) => set({ messages }),
+
+  mergeMessages: (incoming, localUserId) =>
+    set((state) => {
+      const known = new Set(state.messages.map((m) => m.id));
+      const fresh = incoming.filter((m) => !known.has(m.id));
+      if (fresh.length === 0) return state;
+
+      // Keep optimistic entries that the server hasn't echoed back yet.
+      const pending = state.messages.filter(
+        (m) => m.status !== "sent" && !incoming.some((i) => i.body === m.body),
+      );
+
+      const merged = [...pending, ...incoming].sort(
+        (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt),
+      );
+
+      const fromOthers = fresh.filter((m) => m.userId !== localUserId).length;
+
+      return {
+        messages: merged,
+        unreadCount: state.unreadCount + fromOthers,
+      };
+    }),
 
   addMessage: (message) =>
     set((state) => {

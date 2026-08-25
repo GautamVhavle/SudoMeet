@@ -1,16 +1,20 @@
 /**
  * Auto-hide controls hook — shows controls on movement/interaction, hides after inactivity.
  *
- * Behavior (as per Phase 10 plan):
+ * Behavior:
  *   - Show on mouse movement
  *   - Show on keyboard interaction
  *   - Never hide while menu/dialog is open
  *   - Mobile controls remain accessible
+ *
+ * The pending timer lives in a ref, never in state: keeping it in state made
+ * `resetTimeout` change identity on every tick, which re-ran the listener
+ * effect and produced an infinite render loop that froze the whole call page.
  */
 
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface UseAutoHideControlsOptions {
   /** Delay in ms before hiding controls (default: 3000) */
@@ -34,91 +38,72 @@ export function useAutoHideControls({
   hasOpenMenu = false,
 }: UseAutoHideControlsOptions = {}): UseAutoHideControlsReturn {
   const [isVisible, setIsVisible] = useState(true);
-  const [timeoutId, setTimeoutId] = useState<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const show = useCallback(() => {
-    setIsVisible(true);
+  // Read inside the timer callback so the callbacks below stay stable.
+  const optionsRef = useRef({ hideDelay, enabled, hasOpenMenu });
+  optionsRef.current = { hideDelay, enabled, hasOpenMenu };
+
+  const clearPending = useCallback(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
   }, []);
+
+  const show = useCallback(() => setIsVisible(true), []);
 
   const hide = useCallback(() => {
-    if (!hasOpenMenu) {
-      setIsVisible(false);
-    }
-  }, [hasOpenMenu]);
-
-  const toggle = useCallback(() => {
-    setIsVisible((prev) => !prev);
+    if (!optionsRef.current.hasOpenMenu) setIsVisible(false);
   }, []);
 
+  const toggle = useCallback(() => setIsVisible((prev) => !prev), []);
+
   const resetTimeout = useCallback(() => {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-
-    if (!enabled || hasOpenMenu) {
-      return;
-    }
-
-    const newTimeoutId = setTimeout(() => {
+    clearPending();
+    const { enabled: on, hasOpenMenu: menuOpen, hideDelay: delay } = optionsRef.current;
+    if (!on || menuOpen) return;
+    timeoutRef.current = setTimeout(() => {
+      timeoutRef.current = null;
       hide();
-    }, hideDelay);
-
-    setTimeoutId(newTimeoutId);
-  }, [timeoutId, enabled, hasOpenMenu, hide, hideDelay]);
+    }, delay);
+  }, [clearPending, hide]);
 
   useEffect(() => {
     if (!enabled) {
       setIsVisible(true);
+      clearPending();
       return;
     }
 
-    // Show controls on mouse movement
-    const handleMouseMove = () => {
+    const handleActivity = () => {
       show();
       resetTimeout();
     };
 
-    // Show controls on keyboard interaction
-    const handleKeyDown = () => {
-      show();
-      resetTimeout();
-    };
+    document.addEventListener("mousemove", handleActivity);
+    document.addEventListener("keydown", handleActivity);
+    document.addEventListener("touchstart", handleActivity);
 
-    // Show controls on touch (mobile)
-    const handleTouchStart = () => {
-      show();
-      resetTimeout();
-    };
-
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("keydown", handleKeyDown);
-    document.addEventListener("touchstart", handleTouchStart);
-
-    // Initial timeout
     resetTimeout();
 
     return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("keydown", handleKeyDown);
-      document.removeEventListener("touchstart", handleTouchStart);
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
+      document.removeEventListener("mousemove", handleActivity);
+      document.removeEventListener("keydown", handleActivity);
+      document.removeEventListener("touchstart", handleActivity);
+      clearPending();
     };
-  }, [enabled, show, resetTimeout, timeoutId]);
+  }, [enabled, show, resetTimeout, clearPending]);
 
-  // Keep controls visible when menu is open
+  // Keep controls visible while a menu or dialog is open.
   useEffect(() => {
     if (hasOpenMenu) {
       show();
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        setTimeoutId(null);
-      }
+      clearPending();
     } else {
       resetTimeout();
     }
-  }, [hasOpenMenu, show, resetTimeout, timeoutId]);
+  }, [hasOpenMenu, show, resetTimeout, clearPending]);
 
   return {
     isVisible,

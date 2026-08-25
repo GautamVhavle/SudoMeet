@@ -32,6 +32,7 @@ export function useChat(options: UseChatOptions) {
     unreadCount,
     error,
     setMessages,
+    mergeMessages,
     addMessage,
     updateMessageStatus,
     markAsRead,
@@ -151,17 +152,39 @@ export function useChat(options: UseChatOptions) {
   }, [autoFetch, fetchHistory]);
 
   /**
-   * Subscribe to realtime chat events via SSE (if implemented in Phase 8).
+   * Poll for messages from other participants.
+   *
+   * Upstash's REST client has no pub/sub, so there is no server push to ride;
+   * Postgres is the source of truth and polling keeps delivery working even
+   * when Redis is unavailable.
    */
   useEffect(() => {
-    // TODO: Subscribe to SSE events for realtime message delivery
-    // This would integrate with the existing /api/signal/[meetingId] SSE endpoint
-    // by listening for { type: "chat", data: ChatMessageDTO } events.
-    //
-    // For now, messages are delivered via optimistic updates + API responses.
-    // Full SSE integration can be added when the signaling system is refactored
-    // to support typed event channels.
-  }, [meetingId]);
+    if (!meetingId) return;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/chat/${meetingId}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        mergeMessages(
+          (data.messages as ChatMessageDTO[]).map((msg) => ({
+            ...msg,
+            status: "sent" as const,
+          })),
+          currentUser?.id ?? null,
+        );
+      } catch {
+        // Transient failure — the next tick retries.
+      }
+    };
+
+    const interval = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [meetingId, mergeMessages, currentUser?.id]);
 
   /**
    * Reset on unmount.

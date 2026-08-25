@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { MicOff, VideoOff, MonitorUp } from "lucide-react";
+import { MicOff, VideoOff, MonitorUp, Pin, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { Badge } from "../ui/badge";
@@ -15,15 +15,59 @@ interface VideoTileProps {
   isVideoOff?: boolean;
   isLocal?: boolean;
   isScreenSharing?: boolean;
-  /** Mock video element or null for Phase 5; real MediaStream in Phase 6+ */
+  isPinned?: boolean;
+  connectionState?: "connecting" | "connected" | "reconnecting" | "failed";
+  /** Live MediaStream for this participant. */
   srcObject?: MediaStream | null;
+  /** Output device for remote audio (setSinkId, Chromium only). */
+  audioOutputDeviceId?: string | null;
+  onPin?: (participantId: string) => void;
   className?: string;
+}
+
+/**
+ * Attaches a MediaStream to a media element.
+ *
+ * The element must never be conditionally unmounted: the audio track shares the
+ * stream with the video, so tearing the element down when the camera is off
+ * also silences the participant. Camera-off is a CSS concern only.
+ */
+function useMediaElement<T extends HTMLMediaElement>(
+  srcObject: MediaStream | null | undefined,
+) {
+  const ref = React.useRef<T | null>(null);
+
+  const apply = React.useCallback((element: T | null, stream: MediaStream | null) => {
+    if (!element) return;
+    if (element.srcObject !== stream) {
+      element.srcObject = stream;
+    }
+    // Autoplay may be rejected until the user interacts; retry silently.
+    const played = element.play();
+    if (played) played.catch(() => {});
+  }, []);
+
+  // Ref callback covers remount (where an effect keyed on the stream wouldn't
+  // re-run and the tile would stay black).
+  const attach = React.useCallback(
+    (element: T | null) => {
+      ref.current = element;
+      apply(element, srcObject ?? null);
+    },
+    [apply, srcObject],
+  );
+
+  React.useEffect(() => {
+    apply(ref.current, srcObject ?? null);
+  }, [apply, srcObject]);
+
+  return { attach, ref };
 }
 
 export const VideoTile = React.forwardRef<HTMLDivElement, VideoTileProps>(
   (
     {
-      participantId: _participantId,
+      participantId,
       name,
       avatarUrl,
       isSpeaking = false,
@@ -31,80 +75,129 @@ export const VideoTile = React.forwardRef<HTMLDivElement, VideoTileProps>(
       isVideoOff = false,
       isLocal = false,
       isScreenSharing = false,
+      isPinned = false,
+      connectionState,
       srcObject,
+      audioOutputDeviceId,
+      onPin,
       className,
     },
-    ref
+    ref,
   ) => {
-    const videoRef = React.useRef<HTMLVideoElement>(null);
+    const video = useMediaElement<HTMLVideoElement>(srcObject);
+    const audio = useMediaElement<HTMLAudioElement>(isLocal ? null : srcObject);
 
+    const hasVideo = Boolean(
+      srcObject && srcObject.getVideoTracks().length > 0 && !isVideoOff,
+    );
+
+    // Route remote audio to the selected speaker where supported.
     React.useEffect(() => {
-      if (videoRef.current && srcObject) {
-        videoRef.current.srcObject = srcObject;
-      }
-    }, [srcObject]);
+      const element = audio.ref.current as
+        | (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> })
+        | null;
+      if (!element?.setSinkId || !audioOutputDeviceId) return;
+      element.setSinkId(audioOutputDeviceId).catch(() => {});
+    }, [audio.ref, audioOutputDeviceId, srcObject]);
 
-    const initials = name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
+    const initials =
+      name
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2) || "?";
+
+    const isPending =
+      connectionState === "connecting" || connectionState === "reconnecting";
 
     return (
       <div
         ref={ref}
+        data-testid="video-tile"
         className={cn(
-          "relative overflow-hidden rounded-xl bg-background-subtle border transition-all",
+          "group relative min-h-0 min-w-0 overflow-hidden rounded-xl border bg-background-subtle transition-all",
           isSpeaking
             ? "border-accent shadow-[0_0_0_2px_var(--accent)]"
             : "border-border",
-          className
+          className,
         )}
       >
-        {/* Video or Avatar */}
-        <div className="relative aspect-video w-full bg-background-subtle">
-          {!isVideoOff && srcObject ? (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted={isLocal}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center">
-              <Avatar className="h-20 w-20">
+        <div className="relative h-full w-full bg-background-subtle">
+          {/* Always mounted — unmounting would kill the audio track too. */}
+          <video
+            ref={video.attach}
+            autoPlay
+            playsInline
+            muted
+            className={cn(
+              "h-full w-full object-cover transition-opacity",
+              // Mirror your own camera, but never a shared screen.
+              isLocal && !isScreenSharing && "-scale-x-100",
+              hasVideo ? "opacity-100" : "opacity-0",
+            )}
+          />
+
+          {/* Remote audio gets its own element so UI state changes can never
+              interrupt playback. */}
+          {!isLocal && (
+            <audio ref={audio.attach} autoPlay playsInline className="hidden" />
+          )}
+
+          {!hasVideo && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Avatar className="h-14 w-14 sm:h-20 sm:w-20">
                 <AvatarImage src={avatarUrl} alt={name} />
-                <AvatarFallback className="bg-muted text-2xl">
+                <AvatarFallback className="bg-muted text-lg sm:text-2xl">
                   {initials}
                 </AvatarFallback>
               </Avatar>
             </div>
           )}
+
+          {isPending && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+              <Loader2 className="h-6 w-6 animate-spin text-white" />
+            </div>
+          )}
         </div>
 
-        {/* Overlay info */}
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-white">
+        {onPin && (
+          <button
+            type="button"
+            onClick={() => onPin(participantId)}
+            aria-label={isPinned ? `Unpin ${name}` : `Pin ${name}`}
+            aria-pressed={isPinned}
+            className={cn(
+              "absolute right-2 top-2 rounded-full bg-black/60 p-2 text-white transition-opacity",
+              "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
+              isPinned
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+            )}
+          >
+            <Pin className={cn("h-3.5 w-3.5", isPinned && "fill-current")} />
+          </button>
+        )}
+
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2 sm:p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate text-xs font-medium text-white sm:text-sm">
                 {name}
                 {isLocal && " (You)"}
               </span>
-              {isSpeaking && (
-                <Badge variant="accent" className="text-xs">
-                  Speaking
-                </Badge>
-              )}
               {isScreenSharing && (
-                <Badge variant="secondary" className="text-xs flex items-center gap-1">
+                <Badge
+                  variant="secondary"
+                  className="hidden shrink-0 items-center gap-1 text-xs sm:flex"
+                >
                   <MonitorUp className="h-3 w-3" />
                   Presenting
                 </Badge>
               )}
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex shrink-0 items-center gap-1">
               {isMuted && (
                 <div className="rounded-full bg-destructive/90 p-1.5">
                   <MicOff className="h-3 w-3 text-white" />
@@ -120,7 +213,6 @@ export const VideoTile = React.forwardRef<HTMLDivElement, VideoTileProps>(
         </div>
       </div>
     );
-  }
+  },
 );
 VideoTile.displayName = "VideoTile";
-

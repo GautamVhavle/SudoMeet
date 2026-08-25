@@ -8,7 +8,14 @@
 import SimplePeer from "simple-peer";
 import type { Instance as SimplePeerInstance } from "simple-peer";
 
-export type PeerConnectionState = "new" | "connecting" | "connected" | "disconnected" | "failed";
+export type PeerConnectionState =
+  | "new"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "disconnected"
+  | "failed";
+
 
 export interface PeerConnectionCallbacks {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -19,6 +26,39 @@ export interface PeerConnectionCallbacks {
 }
 
 /**
+ * ICE servers for the mesh.
+ *
+ * STUN alone cannot traverse symmetric NAT or strict mobile carrier networks,
+ * which is why calls between devices on different networks silently fail to
+ * connect. Set NEXT_PUBLIC_TURN_URL / _USERNAME / _CREDENTIAL to add a relay.
+ */
+function getIceServers(): RTCIceServer[] {
+  const servers: RTCIceServer[] = [
+    {
+      urls: [
+        "stun:stun.l.google.com:19302",
+        "stun:stun1.l.google.com:19302",
+        "stun:stun2.l.google.com:19302",
+      ],
+    },
+  ];
+
+  const turnUrl = process.env.NEXT_PUBLIC_TURN_URL;
+  const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME;
+  const turnCredential = process.env.NEXT_PUBLIC_TURN_CREDENTIAL;
+
+  if (turnUrl) {
+    servers.push({
+      urls: turnUrl.split(",").map((u) => u.trim()).filter(Boolean),
+      ...(turnUsername ? { username: turnUsername } : {}),
+      ...(turnCredential ? { credential: turnCredential } : {}),
+    });
+  }
+
+  return servers;
+}
+
+/**
  * Manages a single WebRTC peer connection using simple-peer.
  */
 export class PeerConnection {
@@ -26,6 +66,9 @@ export class PeerConnection {
   private state: PeerConnectionState = "new";
   private callbacks: PeerConnectionCallbacks;
   private remotePeerId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private pendingSignals: any[] = [];
+  private destroyed = false;
 
   constructor(remotePeerId: string, callbacks: PeerConnectionCallbacks) {
     this.remotePeerId = remotePeerId;
@@ -48,11 +91,15 @@ export class PeerConnection {
 
   /**
    * Process incoming signal from the remote peer.
+   *
+   * Signals routinely arrive before the local peer object exists (the remote
+   * side starts trickling ICE the moment it creates its offer), so anything
+   * early is queued and flushed once the peer is created.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   handleSignal(signal: any): void {
     if (!this.peer) {
-      console.warn(`[PeerConnection] No peer instance for ${this.remotePeerId}`);
+      this.pendingSignals.push(signal);
       return;
     }
 
@@ -66,37 +113,68 @@ export class PeerConnection {
   }
 
   /**
-   * Replace the local media stream (e.g., when muting/unmuting).
+   * Swap the outbound video track (camera ↔ screen share).
+   *
+   * Uses sender.replaceTrack so the swap happens without renegotiation.
+   * The previous removeTrack/addTrack approach dropped the audio sender and
+   * triggered a renegotiation storm that frequently killed the connection.
    */
   replaceStream(newStream: MediaStream): void {
-    if (!this.peer) return;
+    const pc = this.getPeerConnection();
+    if (!pc) return;
 
     try {
-      // Remove old tracks
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const senders = (this.peer as any)._pc?.getSenders?.() || [];
-      senders.forEach((sender: RTCRtpSender) => {
-        if (sender.track) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (this.peer as any)._pc?.removeTrack(sender);
-        }
-      });
+      const senders = pc.getSenders();
 
-      // Add new tracks
-      newStream.getTracks().forEach((track) => {
-        this.peer?.addTrack(track, newStream);
-      });
+      for (const kind of ["video", "audio"] as const) {
+        const nextTrack =
+          kind === "video"
+            ? newStream.getVideoTracks()[0]
+            : newStream.getAudioTracks()[0];
+        if (!nextTrack) continue;
+
+        const sender = senders.find((s) => s.track?.kind === kind);
+        if (sender) {
+          sender.replaceTrack(nextTrack).catch((error) => {
+            console.error(`[PeerConnection] replaceTrack(${kind}) failed:`, error);
+          });
+        } else {
+          this.peer?.addTrack(nextTrack, newStream);
+        }
+      }
     } catch (error) {
       console.error(`[PeerConnection] Replace stream error:`, error);
     }
+  }
+
+  /** Ask ICE to find a new candidate pair after a network change. */
+  restartIce(): void {
+    const pc = this.getPeerConnection();
+    if (!pc) return;
+    try {
+      pc.restartIce();
+    } catch (error) {
+      console.error(`[PeerConnection] restartIce failed:`, error);
+    }
+  }
+
+  /** True once the peer has been created (offer/answer can be processed). */
+  isReady(): boolean {
+    return this.peer !== null;
   }
 
   /**
    * Close the peer connection and clean up resources.
    */
   close(): void {
+    this.destroyed = true;
+    this.pendingSignals = [];
     if (this.peer) {
-      this.peer.destroy();
+      try {
+        this.peer.destroy();
+      } catch {
+        // simple-peer throws if already destroyed.
+      }
       this.peer = null;
     }
     this.setState("disconnected");
@@ -113,14 +191,10 @@ export class PeerConnection {
    * Get WebRTC statistics from the underlying peer connection (Phase 14).
    */
   async getStats(): Promise<RTCStatsReport | null> {
-    if (!this.peer) return null;
+    const pc = this.getPeerConnection();
+    if (!pc) return null;
 
     try {
-      // Access the underlying RTCPeerConnection via simple-peer internal API
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pc = (this.peer as any)._pc as RTCPeerConnection | undefined;
-      if (!pc || pc.connectionState === "closed") return null;
-
       return await pc.getStats();
     } catch (error) {
       console.error(`[PeerConnection] getStats error:`, error);
@@ -129,25 +203,34 @@ export class PeerConnection {
   }
 
   private createPeer(initiator: boolean, stream: MediaStream): void {
-    if (this.peer) {
-      console.warn(`[PeerConnection] Peer already exists for ${this.remotePeerId}`);
-      return;
-    }
+    if (this.peer || this.destroyed) return;
 
     this.peer = new SimplePeer({
       initiator,
       stream,
       trickle: true, // Send ICE candidates incrementally
-      config: {
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:global.stun.twilio.com:3478" },
-        ],
+      config: { iceServers: getIceServers() },
+      // Chrome defaults to VP8-only for some setups; keep both directions open.
+      offerOptions: {
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
       },
     });
 
     this.attachEventHandlers();
     this.setState("connecting");
+
+    // Flush signals that arrived before the peer existed.
+    const queued = this.pendingSignals;
+    this.pendingSignals = [];
+    for (const signal of queued) this.handleSignal(signal);
+  }
+
+  private getPeerConnection(): RTCPeerConnection | null {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pc = (this.peer as any)?._pc as RTCPeerConnection | undefined;
+    if (!pc || pc.connectionState === "closed") return null;
+    return pc;
   }
 
   private attachEventHandlers(): void {
@@ -159,17 +242,14 @@ export class PeerConnection {
     });
 
     this.peer.on("stream", (stream: MediaStream) => {
-      this.setState("connected");
       this.callbacks.onStream(stream);
     });
 
     this.peer.on("connect", () => {
-      console.log(`[PeerConnection] Connected to ${this.remotePeerId}`);
       this.setState("connected");
     });
 
     this.peer.on("close", () => {
-      console.log(`[PeerConnection] Closed connection to ${this.remotePeerId}`);
       this.setState("disconnected");
     });
 
@@ -178,6 +258,27 @@ export class PeerConnection {
       this.setState("failed");
       this.callbacks.onError(error);
     });
+
+    // simple-peer only reports "connect" once; track ICE directly so the UI
+    // reflects drops and so we can attempt recovery on a transient failure.
+    const pc = this.getPeerConnection();
+    if (pc) {
+      pc.addEventListener("iceconnectionstatechange", () => {
+        switch (pc.iceConnectionState) {
+          case "connected":
+          case "completed":
+            this.setState("connected");
+            break;
+          case "disconnected":
+            this.setState("reconnecting");
+            break;
+          case "failed":
+            this.setState("failed");
+            this.restartIce();
+            break;
+        }
+      });
+    }
   }
 
   private setState(newState: PeerConnectionState): void {

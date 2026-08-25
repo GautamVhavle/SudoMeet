@@ -13,85 +13,117 @@ import { Redis } from "@upstash/redis";
 import type { SignalEvent } from "@/lib/media/types";
 import { pubsubChannel } from "./index";
 
+/** Signal logs are short-lived — handshakes complete within seconds. */
+const SIGNAL_TTL_SECONDS = 600;
+
+/** Cap the log so a long meeting can't grow it without bound. */
+const SIGNAL_LOG_MAX = 500;
+
 let redis: Redis | null = null;
 
 /**
  * Get or create the Redis client. Returns null if credentials are missing.
  * Gracefully degrades so build/dev server doesn't crash without Redis.
  */
-function getRedisClient(): Redis | null {
+export function getSignalRedis(): Redis | null {
   if (redis) return redis;
 
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-  if (!url || !token) {
-    console.warn("[Redis] Missing credentials - signaling will not work in production");
-    return null;
-  }
+  if (!url || !token) return null;
 
   redis = new Redis({ url, token });
   return redis;
 }
 
+export function signalLogKey(meetingId: string): string {
+  return `${pubsubChannel("signal", meetingId)}:events`;
+}
+
 /**
- * Publish a signal event to the meeting's signaling channel.
- * No-op if Redis is unavailable.
+ * Append an event to the meeting's signal log.
  *
- * Note: Upstash Redis REST API doesn't support native pub/sub.
- * We use a Redis list as a queue instead.
+ * The log is append-only. Deleting consumed entries (the previous behaviour)
+ * meant whichever subscriber polled first swallowed the events and every other
+ * device in the room saw nothing.
  */
 export async function publishSignal(
   meetingId: string,
   event: SignalEvent,
 ): Promise<void> {
-  const client = getRedisClient();
-  if (!client) {
-    console.warn("[Redis] Cannot publish signal - no client");
-    return;
+  const client = getSignalRedis();
+  if (!client) return;
+
+  const key = signalLogKey(meetingId);
+  const length = await client.rpush(key, JSON.stringify(event));
+
+  if (length > SIGNAL_LOG_MAX) {
+    await client.ltrim(key, -SIGNAL_LOG_MAX, -1);
   }
-
-  const channel = pubsubChannel("signal", meetingId);
-  const listKey = `${channel}:events`;
-
-  // Push event to the list (acts as a queue for SSE polling)
-  await client.rpush(listKey, JSON.stringify(event));
-
-  // Set TTL on the list to auto-expire after 1 hour
-  await client.expire(listKey, 3600);
+  await client.expire(key, SIGNAL_TTL_SECONDS);
 }
 
 /**
- * Subscribe to signaling events for a meeting.
- * Returns an async iterator that yields SignalEvent objects.
+ * Read events appended after `cursor`. Non-destructive, so every subscriber
+ * observes the full stream. Returns the advanced cursor with the events.
+ */
+export async function readSignalsSince(
+  meetingId: string,
+  cursor: number,
+): Promise<{ events: SignalEvent[]; cursor: number }> {
+  const client = getSignalRedis();
+  if (!client) return { events: [], cursor };
+
+  const raw = await client.lrange(signalLogKey(meetingId), cursor, -1);
+  if (raw.length === 0) return { events: [], cursor };
+
+  const events: SignalEvent[] = [];
+  for (const entry of raw) {
+    const parsed = parseEntry(entry);
+    if (parsed) events.push(parsed);
+  }
+
+  return { events, cursor: cursor + raw.length };
+}
+
+/** Current log length, used to skip backlog when a subscriber attaches. */
+export async function getSignalLogLength(meetingId: string): Promise<number> {
+  const client = getSignalRedis();
+  if (!client) return 0;
+  return client.llen(signalLogKey(meetingId));
+}
+
+// Upstash may hand back already-parsed objects depending on response encoding.
+function parseEntry(entry: unknown): SignalEvent | null {
+  if (entry && typeof entry === "object") return entry as SignalEvent;
+  if (typeof entry !== "string") return null;
+  try {
+    return JSON.parse(entry) as SignalEvent;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * In-memory bus for local dev / single-instance deploys.
  *
- * Note: Upstash Redis REST API does not support native pub/sub subscriptions.
- * SSE-based polling is implemented in the API route instead.
+ * Held on globalThis so Next.js hot reloads (and repeated route-module
+ * evaluation) don't split publishers from subscribers — which made two tabs
+ * look connected while neither received anything.
  */
-export async function* subscribeToSignals(
-  _meetingId: string,
-): AsyncGenerator<SignalEvent> {
-  const client = getRedisClient();
-  if (!client) {
-    console.warn("[Redis] Cannot subscribe to signals - no client");
-    return;
+type SignalListener = (event: SignalEvent) => void;
+
+const globalBus = globalThis as unknown as {
+  __sudomeetSignalBus?: Map<string, Set<SignalListener>>;
+};
+
+function bus(): Map<string, Set<SignalListener>> {
+  if (!globalBus.__sudomeetSignalBus) {
+    globalBus.__sudomeetSignalBus = new Map();
   }
-
-  // This is a placeholder for the SSE implementation in the API route.
-  // The actual subscription happens via GET /api/signal/[meetingId].
-  throw new Error(
-    "Direct Redis subscription not supported. Use SSE endpoint instead.",
-  );
+  return globalBus.__sudomeetSignalBus;
 }
-
-/**
- * In-memory fallback for local dev without Redis.
- * Subscribers indexed by meetingId.
- */
-const inMemorySubscribers = new Map<
-  string,
-  Set<(event: SignalEvent) => void>
->();
 
 /**
  * Publish signal event to in-memory subscribers (local dev fallback).
@@ -100,16 +132,17 @@ export function publishSignalInMemory(
   meetingId: string,
   event: SignalEvent,
 ): void {
-  const subscribers = inMemorySubscribers.get(meetingId);
-  if (!subscribers) return;
+  const listeners = bus().get(meetingId);
+  if (!listeners) return;
 
-  subscribers.forEach((callback) => {
+  // Copy first: a listener may unsubscribe while we iterate.
+  for (const listener of Array.from(listeners)) {
     try {
-      callback(event);
+      listener(event);
     } catch (error) {
       console.error("[InMemorySignal] Subscriber error:", error);
     }
-  });
+  }
 }
 
 /**
@@ -118,19 +151,18 @@ export function publishSignalInMemory(
  */
 export function subscribeToSignalsInMemory(
   meetingId: string,
-  callback: (event: SignalEvent) => void,
+  callback: SignalListener,
 ): () => void {
-  if (!inMemorySubscribers.has(meetingId)) {
-    inMemorySubscribers.set(meetingId, new Set());
+  const registry = bus();
+  let listeners = registry.get(meetingId);
+  if (!listeners) {
+    listeners = new Set();
+    registry.set(meetingId, listeners);
   }
-
-  const subscribers = inMemorySubscribers.get(meetingId)!;
-  subscribers.add(callback);
+  listeners.add(callback);
 
   return () => {
-    subscribers.delete(callback);
-    if (subscribers.size === 0) {
-      inMemorySubscribers.delete(meetingId);
-    }
+    listeners.delete(callback);
+    if (listeners.size === 0) registry.delete(meetingId);
   };
 }

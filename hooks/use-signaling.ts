@@ -7,7 +7,7 @@
 
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SignalEvent } from "@/lib/media/types";
 
@@ -20,7 +20,13 @@ export interface UseSignalingOptions {
 export function useSignaling({ meetingId, enabled, onEvent }: UseSignalingOptions) {
   const [connected, setConnected] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Held in a ref so a changing handler never tears down the SSE stream.
+  const onEventRef = useRef(onEvent);
+  useEffect(() => {
+    onEventRef.current = onEvent;
+  }, [onEvent]);
 
   // Subscribe to SSE stream
   useEffect(() => {
@@ -28,40 +34,44 @@ export function useSignaling({ meetingId, enabled, onEvent }: UseSignalingOption
       return;
     }
 
+    let disposed = false;
+    let attempt = 0;
+
     function connect() {
+      if (disposed) return;
+
       const eventSource = new EventSource(`/api/signal/${meetingId}`);
+      eventSourceRef.current = eventSource;
 
       eventSource.onopen = () => {
-        console.log("[useSignaling] Connected to signal stream");
+        attempt = 0;
         setConnected(true);
       };
 
       eventSource.onmessage = (e) => {
         try {
-          const event = JSON.parse(e.data) as SignalEvent;
-          onEvent(event);
+          onEventRef.current(JSON.parse(e.data) as SignalEvent);
         } catch (error) {
           console.error("[useSignaling] Failed to parse event:", error);
         }
       };
 
       eventSource.onerror = () => {
-        console.error("[useSignaling] SSE error - reconnecting in 2s");
         setConnected(false);
         eventSource.close();
+        if (disposed) return;
 
-        // Reconnect after delay
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connect();
-        }, 2000);
+        // Back off so a server restart doesn't become a reconnect storm.
+        attempt += 1;
+        const delay = Math.min(1000 * 2 ** (attempt - 1), 10_000);
+        reconnectTimeoutRef.current = setTimeout(connect, delay);
       };
-
-      eventSourceRef.current = eventSource;
     }
 
     connect();
 
     return () => {
+      disposed = true;
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
@@ -72,24 +82,29 @@ export function useSignaling({ meetingId, enabled, onEvent }: UseSignalingOption
       }
       setConnected(false);
     };
-  }, [meetingId, enabled, onEvent]);
+  }, [meetingId, enabled]);
 
-  // Publish signal event
-  const publishEvent = async (event: SignalEvent) => {
-    try {
-      const response = await fetch(`/api/signal/${meetingId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(event),
-      });
+  const publishEvent = useCallback(
+    async (event: SignalEvent) => {
+      try {
+        const response = await fetch(`/api/signal/${meetingId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(event),
+        });
 
-      if (!response.ok) {
-        console.error("[useSignaling] Failed to publish event:", await response.text());
+        if (!response.ok) {
+          console.error(
+            "[useSignaling] Failed to publish event:",
+            await response.text(),
+          );
+        }
+      } catch (error) {
+        console.error("[useSignaling] Publish error:", error);
       }
-    } catch (error) {
-      console.error("[useSignaling] Publish error:", error);
-    }
-  };
+    },
+    [meetingId],
+  );
 
   return {
     connected,

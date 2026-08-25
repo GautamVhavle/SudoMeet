@@ -30,10 +30,31 @@ export interface TrackChangedEvent {
  *
  * Payload types are `any` to accommodate simple-peer's internal SignalData structure.
  */
+/**
+ * WebRTC signaling events for Tier A P2P mesh.
+ * Relayed through Redis pub/sub via SSE signaling API.
+ *
+ * Payload types are `any` to accommodate simple-peer's internal SignalData structure.
+ */
 export type SignalEvent =
   | {
+      /** Broadcast on join. Everyone already in the room replies with `peer-ack`. */
       type: "peer-joined";
       peerId: string;
+      name?: string;
+    }
+  | {
+      /**
+       * Directed reply to a `peer-joined`. Without this a joiner never learns
+       * who is already in the room and the mesh stays empty.
+       */
+      type: "peer-ack";
+      from: string;
+      to: string;
+      name?: string;
+      isMicrophoneEnabled?: boolean;
+      isCameraEnabled?: boolean;
+      isScreenSharing?: boolean;
     }
   | {
       type: "offer";
@@ -57,9 +78,25 @@ export type SignalEvent =
       payload: any;
     }
   | {
+      /** Mic/camera/screen state broadcast so remote tiles stay accurate. */
+      type: "peer-state";
+      from: string;
+      isMicrophoneEnabled: boolean;
+      isCameraEnabled: boolean;
+      isScreenSharing: boolean;
+    }
+  | {
+      type: "reaction";
+      participantId: string;
+      participantName: string;
+      emoji: string;
+      timestamp: number;
+    }
+  | {
       type: "peer-left";
       peerId: string;
     };
+
 
 /**
  * Media state machine for connection lifecycle.
@@ -89,6 +126,8 @@ export interface CallParticipant {
   isMicrophoneEnabled: boolean;
   isCameraEnabled: boolean;
   isScreenSharing: boolean;
+  /** Peer connection health, used by the tile's connection badge. */
+  connectionState?: "connecting" | "connected" | "reconnecting" | "failed";
 }
 
 export type ParticipantCallback = (participant: CallParticipant) => void;

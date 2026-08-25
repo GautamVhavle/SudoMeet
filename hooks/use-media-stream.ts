@@ -142,6 +142,10 @@ export function useMediaStream(options: UseMediaStreamOptions = {}) {
     setAudioEnabled,
     toggleVideo,
     toggleAudio,
+    // Callers navigating away must release the camera explicitly: the device
+    // stays busy until every track is stopped, and the next page's
+    // getUserMedia would fail with NotReadableError.
+    stop: stopStream,
     retry: () => startStream(state.enabled.video, state.enabled.audio),
   };
 }

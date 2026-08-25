@@ -46,11 +46,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
     const meetingId = meeting.id;
 
-    // Parse query params
+    // Parse query params. searchParams.get() yields null when absent, which the
+    // schema rejects — coerce to undefined so the defaults apply.
     const { searchParams } = new URL(request.url);
     const parseResult = FetchMessagesSchema.safeParse({
-      limit: searchParams.get("limit"),
-      before: searchParams.get("before"),
+      limit: searchParams.get("limit") ?? undefined,
+      before: searchParams.get("before") ?? undefined,
     });
 
     if (!parseResult.success) {
@@ -107,9 +108,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
     const meetingId = meeting.id;
 
-    if (meeting.status !== "ACTIVE" && meeting.status !== "WAITING") {
+    // Only a finished meeting blocks chat. Rooms sit in DRAFT/SCHEDULED until
+    // someone actually joins, so gating on ACTIVE alone rejected every message.
+    if (meeting.status === "ENDED" || meeting.status === "EXPIRED") {
       return NextResponse.json(
-        { error: "Meeting is not active" },
+        { error: "Meeting has ended" },
         { status: 403 },
       );
     }

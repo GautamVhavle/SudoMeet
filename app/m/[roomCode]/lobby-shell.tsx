@@ -148,6 +148,26 @@ function LobbyWithPreview({
   const micLevel = useMicLevel(media.stream);
   const network = useNetworkCheck();
 
+  const enterCall = React.useCallback(() => {
+    // Carry the lobby's mic/camera choices into the call.
+    try {
+      sessionStorage.setItem(
+        "sudomeet.join-prefs",
+        JSON.stringify({
+          muted: !media.enabled.audio,
+          cameraOff: !media.enabled.video,
+        }),
+      );
+    } catch {
+      // Non-fatal: the call falls back to mic and camera on.
+    }
+
+    // Release the preview devices first — otherwise the call page hits
+    // NotReadableError because the camera is still held by this page.
+    media.stop();
+    router.push(`/m/${meeting.roomCode}/call`);
+  }, [media, router, meeting.roomCode]);
+
   const handleJoin = async () => {
     // If guest without name, save identity first
     if (!userId && !guestIdentity) {
@@ -173,7 +193,7 @@ function LobbyWithPreview({
         }
 
         // Cookie is now set, proceed to call
-        router.push(`/m/${meeting.roomCode}/call`);
+        enterCall();
       } catch {
         setGuestError("Network error — please try again");
       } finally {
@@ -181,7 +201,7 @@ function LobbyWithPreview({
       }
     } else {
       // Authenticated or existing guest — go straight to call
-      router.push(`/m/${meeting.roomCode}/call`);
+      enterCall();
     }
   };
 

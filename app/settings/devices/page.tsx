@@ -1,13 +1,14 @@
-import { Mic } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, Mic } from "lucide-react";
 
 import { getOrCreateIdentity } from "@/lib/identity";
 import { ensureAnonymousUser } from "@/lib/identity/ensure-user";
+import { DeviceSettings } from "./device-settings";
 
 export { dynamic } from "@/app/dynamic-exports";
 
 /**
- * /settings/devices — device settings (Phase 4 minimal placeholder).
- * Real device selector UI arrives in Phase 6 (lobby).
+ * /settings/devices — camera, microphone and speaker selection with preview.
  */
 
 export default async function DeviceSettingsPage() {
@@ -15,21 +16,22 @@ export default async function DeviceSettingsPage() {
   await ensureAnonymousUser(identity);
 
   return (
-    <main className="min-h-screen bg-background px-4 py-8">
+    <main className="min-h-dvh bg-background px-4 py-8">
       <div className="mx-auto max-w-2xl">
+        <Link
+          href="/settings"
+          className="mb-6 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" />
+          Settings
+        </Link>
+
         <div className="mb-8 flex items-center gap-3">
           <Mic className="size-6 text-muted-foreground" />
-          <h1 className="text-2xl font-semibold text-foreground">Device Settings</h1>
+          <h1 className="text-2xl font-semibold text-foreground">Devices</h1>
         </div>
 
-        <div className="rounded-lg border border-border bg-card p-6">
-          <p className="text-sm text-muted-foreground">
-            Camera, microphone, and speaker selection arrives in Phase 6 (pre-join lobby UI).
-          </p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            For now, your browser&apos;s default devices will be used.
-          </p>
-        </div>
+        <DeviceSettings />
       </div>
     </main>
   );

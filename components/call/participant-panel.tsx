@@ -14,9 +14,12 @@ import {
 import { Badge } from "../ui/badge";
 import { usePresence } from "@/hooks/use-presence";
 import { useParticipants } from "@/hooks/use-participants";
+import type { CallParticipant } from "@/lib/media/types";
 
 interface ParticipantPanelProps {
   meetingId: string;
+  /** Live roster from the media provider. Falls back to presence when absent. */
+  participants?: CallParticipant[];
   onPinParticipant?: (id: string) => void;
   onRemoveParticipant?: (id: string) => void;
   className?: string;
@@ -25,13 +28,13 @@ interface ParticipantPanelProps {
 export const ParticipantPanel = React.forwardRef<
   HTMLDivElement,
   ParticipantPanelProps
->(({ meetingId, onPinParticipant, onRemoveParticipant, className }, ref) => {
+>(({ meetingId, participants: liveParticipants, onPinParticipant, onRemoveParticipant, className }, ref) => {
   const { participantList: presenceList, localParticipantId } = usePresence(meetingId);
   const { participantList, activeSpeakerId, isRoomLocked } = useParticipants();
   const [pinnedIds, setPinnedIds] = React.useState<Set<string>>(new Set());
 
   // Merge presence data with participant metadata
-  const participants = presenceList.map((presence) => {
+  const presenceParticipants = presenceList.map((presence) => {
     const metadata = participantList.find((p) => p.id === presence.participantId);
     return {
       id: presence.participantId,
@@ -48,6 +51,23 @@ export const ParticipantPanel = React.forwardRef<
       isPinned: pinnedIds.has(presence.participantId),
     };
   });
+
+  const participants = liveParticipants
+    ? liveParticipants.map((participant) => ({
+        id: participant.id,
+        name: participant.name,
+        role: participant.isLocal ? "host" : "participant",
+        isMuted: !participant.isMicrophoneEnabled,
+        isCameraOn: participant.isCameraEnabled,
+        isScreenSharing: participant.isScreenSharing,
+        handRaised: false,
+        isSpeaking: false,
+        isActiveSpeaker: activeSpeakerId === participant.id,
+        connectionState: participant.connectionState ?? "connected",
+        isLocal: participant.isLocal,
+        isPinned: pinnedIds.has(participant.id),
+      }))
+    : presenceParticipants;
 
   const handlePin = (id: string) => {
     setPinnedIds((prev) => {
@@ -74,7 +94,7 @@ export const ParticipantPanel = React.forwardRef<
     <div
       ref={ref}
       className={cn(
-        "flex flex-col h-full bg-background-elevated border-l border-border",
+        "flex h-full flex-col bg-background-elevated",
         className
       )}
     >

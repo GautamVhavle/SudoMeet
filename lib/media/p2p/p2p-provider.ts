@@ -26,15 +26,45 @@ export interface P2PMediaProviderConfig {
   localParticipantId: string;
   localParticipantName: string;
   onSignalEvent: (event: SignalEvent) => void;
+  /** Notified whenever a remote stream is attached or replaced. */
+  onRemoteStream?: (peerId: string, stream: MediaStream) => void;
+  /** Preferred input devices, from the lobby / settings dialog. */
+  audioDeviceId?: string | null;
+  videoDeviceId?: string | null;
+  /** Start with mic/camera off (lobby toggles). */
+  startMuted?: boolean;
+  startCameraOff?: boolean;
+}
+
+function buildConstraints(
+  audioDeviceId?: string | null,
+  videoDeviceId?: string | null,
+): MediaStreamConstraints {
+  return {
+    audio: {
+      ...(audioDeviceId ? { deviceId: { exact: audioDeviceId } } : {}),
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+    video: {
+      ...(videoDeviceId ? { deviceId: { exact: videoDeviceId } } : {}),
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+      frameRate: { ideal: 30 },
+    },
+  };
 }
 
 /**
- * P2P mesh media provider for Tier A calls (≤4 participants).
+ * P2P mesh media provider for Tier A calls (≤4 people).
  */
 export class P2PMediaProvider implements MediaProvider {
   private config: P2PMediaProviderConfig;
   private stateMachine = new MediaStateMachine();
   private localStream: MediaStream | null = null;
+  private cameraStream: MediaStream | null = null;
+  private screenStream: MediaStream | null = null;
   private peerConnections = new Map<string, PeerConnection>();
   private remoteStreams = new Map<string, MediaStream>();
   private participants = new Map<string, CallParticipant>();
@@ -51,49 +81,101 @@ export class P2PMediaProvider implements MediaProvider {
 
   constructor(config: P2PMediaProviderConfig) {
     this.config = config;
+    this.localMicEnabled = !config.startMuted;
+    this.localCameraEnabled = !config.startCameraOff;
 
     // Add local participant
     this.participants.set(config.localParticipantId, {
       id: config.localParticipantId,
       name: config.localParticipantName,
       isLocal: true,
-      isMicrophoneEnabled: true,
-      isCameraEnabled: true,
+      isMicrophoneEnabled: this.localMicEnabled,
+      isCameraEnabled: this.localCameraEnabled,
       isScreenSharing: false,
+      connectionState: "connected",
     });
   }
 
-  async connect(): Promise<void> {
-    if (this.stateMachine.getState() !== "IDLE") {
-      console.warn("[P2PMediaProvider] Already connected or connecting");
-      return;
-    }
+  /**
+   * Acquire local media only. Split out from connect() so the UI can show a
+   * self-preview (and surface permission errors) before any signalling starts.
+   */
+  async acquireMedia(): Promise<MediaStream> {
+    if (this.localStream) return this.localStream;
 
     this.stateMachine.transition("REQUESTING_MEDIA");
 
+    const { audioDeviceId, videoDeviceId } = this.config;
+
+    let stream: MediaStream;
     try {
-      // Request local media
-      this.localStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: true,
-      });
-
-      this.stateMachine.transition("READY");
-      this.stateMachine.transition("CONNECTING");
-
-      // Announce presence to the room
-      this.config.onSignalEvent({
-        type: "peer-joined",
-        peerId: this.config.localParticipantId,
-      });
-
-      this.stateMachine.transition("CONNECTED");
+      stream = await navigator.mediaDevices.getUserMedia(
+        buildConstraints(audioDeviceId, videoDeviceId),
+      );
     } catch (error) {
-      console.error("[P2PMediaProvider] Failed to acquire media:", error);
-      this.stateMachine.transition("FAILED");
-      throw error;
+      // A missing/busy camera must not take the whole call down — fall back to
+      // audio-only, then to a silent placeholder, so the user still joins.
+      console.warn("[P2PMediaProvider] Full media failed, trying audio-only:", error);
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true,
+          video: false,
+        });
+        this.localCameraEnabled = false;
+      } catch (audioError) {
+        this.stateMachine.transition("FAILED");
+        throw audioError;
+      }
     }
+
+    this.localStream = stream;
+    this.cameraStream = stream;
+
+    // Apply the lobby's mute/camera choices to the freshly acquired tracks.
+    stream.getAudioTracks().forEach((t) => (t.enabled = this.localMicEnabled));
+    stream.getVideoTracks().forEach((t) => (t.enabled = this.localCameraEnabled));
+
+    const local = this.participants.get(this.config.localParticipantId);
+    if (local) {
+      local.isMicrophoneEnabled =
+        this.localMicEnabled && stream.getAudioTracks().length > 0;
+      local.isCameraEnabled =
+        this.localCameraEnabled && stream.getVideoTracks().length > 0;
+    }
+
+    this.stateMachine.transition("READY");
+    return stream;
   }
+
+  async connect(): Promise<void> {
+    const state = this.stateMachine.getState();
+    if (state === "CONNECTED" || state === "CONNECTING") return;
+
+    await this.acquireMedia();
+
+    this.stateMachine.transition("CONNECTING");
+
+    // Announce ourselves. Everyone already in the room replies with peer-ack,
+    // which is how we discover peers that joined before us.
+    this.config.onSignalEvent({
+      type: "peer-joined",
+      peerId: this.config.localParticipantId,
+      name: this.config.localParticipantName,
+    });
+
+    this.stateMachine.transition("CONNECTED");
+  }
+
+  /** Re-announce presence, e.g. after the SSE stream reconnects. */
+  announce(): void {
+    if (!this.localStream) return;
+    this.config.onSignalEvent({
+      type: "peer-joined",
+      peerId: this.config.localParticipantId,
+      name: this.config.localParticipantName,
+    });
+  }
+
 
   async disconnect(): Promise<void> {
     // Announce departure
@@ -106,11 +188,14 @@ export class P2PMediaProvider implements MediaProvider {
     this.peerConnections.forEach((peer) => peer.close());
     this.peerConnections.clear();
 
-    // Stop local media
-    if (this.localStream) {
-      this.localStream.getTracks().forEach((track) => track.stop());
-      this.localStream = null;
-    }
+    // Stop every local track (camera and any active screen share)
+    this.localStream?.getTracks().forEach((track) => track.stop());
+    this.cameraStream?.getTracks().forEach((track) => track.stop());
+    this.screenStream?.getTracks().forEach((track) => track.stop());
+    this.localStream = null;
+    this.cameraStream = null;
+    this.screenStream = null;
+    this.localScreenSharing = false;
 
     // Clear remote streams
     this.remoteStreams.clear();
@@ -128,21 +213,21 @@ export class P2PMediaProvider implements MediaProvider {
   }
 
   async setMicrophoneEnabled(enabled: boolean): Promise<void> {
-    if (!this.localStream) return;
+    this.localMicEnabled = enabled;
 
-    this.localStream.getAudioTracks().forEach((track) => {
+    this.localStream?.getAudioTracks().forEach((track) => {
       track.enabled = enabled;
     });
 
-    this.localMicEnabled = enabled;
-
-    // Update local participant
     const local = this.participants.get(this.config.localParticipantId);
     if (local) {
       local.isMicrophoneEnabled = enabled;
     }
 
-    // Notify track change
+    // Track.enabled=false sends silence but doesn't fire a remote mute event,
+    // so state has to be broadcast explicitly for other tiles to update.
+    this.broadcastLocalState();
+
     this.trackChangedCallbacks.forEach((callback) => {
       callback({
         participantId: this.config.localParticipantId,
@@ -153,21 +238,19 @@ export class P2PMediaProvider implements MediaProvider {
   }
 
   async setCameraEnabled(enabled: boolean): Promise<void> {
-    if (!this.localStream) return;
+    this.localCameraEnabled = enabled;
 
-    this.localStream.getVideoTracks().forEach((track) => {
+    this.localStream?.getVideoTracks().forEach((track) => {
       track.enabled = enabled;
     });
 
-    this.localCameraEnabled = enabled;
-
-    // Update local participant
     const local = this.participants.get(this.config.localParticipantId);
     if (local) {
       local.isCameraEnabled = enabled;
     }
 
-    // Notify track change
+    this.broadcastLocalState();
+
     this.trackChangedCallbacks.forEach((callback) => {
       callback({
         participantId: this.config.localParticipantId,
@@ -177,70 +260,93 @@ export class P2PMediaProvider implements MediaProvider {
     });
   }
 
-  async startScreenShare(): Promise<void> {
-    try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        // Request system audio where supported (Chrome/Edge)
-        // @ts-expect-error - displaySurface is non-standard but supported in Chrome/Edge
-        audio: { suppressLocalAudioPlayback: false },
-      });
+  /** Swap input devices mid-call without dropping peer connections. */
+  async switchDevices(options: {
+    audioDeviceId?: string | null;
+    videoDeviceId?: string | null;
+  }): Promise<MediaStream | null> {
+    const audioDeviceId = options.audioDeviceId ?? this.config.audioDeviceId;
+    const videoDeviceId = options.videoDeviceId ?? this.config.videoDeviceId;
 
-      // Listen for external stop (user clicks browser's "Stop sharing" button)
-      const videoTrack = screenStream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.addEventListener("ended", () => {
-          // Browser stopped sharing externally, clean up
-          this.stopScreenShare().catch((err) => {
-            console.error("[P2PMediaProvider] Failed to clean up after external stop:", err);
-          });
-        });
-      }
+    const next = await navigator.mediaDevices.getUserMedia(
+      buildConstraints(audioDeviceId, videoDeviceId),
+    );
 
-      // Replace video track in all peer connections
-      this.peerConnections.forEach((peer) => {
-        peer.replaceStream(screenStream);
-      });
+    next.getAudioTracks().forEach((t) => (t.enabled = this.localMicEnabled));
+    next.getVideoTracks().forEach((t) => (t.enabled = this.localCameraEnabled));
 
-      this.localScreenSharing = true;
-
-      // Update local participant
-      const local = this.participants.get(this.config.localParticipantId);
-      if (local) {
-        local.isScreenSharing = true;
-      }
-
-      // Notify track change
-      this.trackChangedCallbacks.forEach((callback) => {
-        callback({
-          participantId: this.config.localParticipantId,
-          track: "screen",
-          change: "started",
-        });
-      });
-    } catch (error) {
-      console.error("[P2PMediaProvider] Screen share failed:", error);
-      throw error;
+    // Only push new tracks to peers if we're not currently screen sharing,
+    // otherwise we'd clobber the shared surface.
+    if (!this.localScreenSharing) {
+      this.peerConnections.forEach((peer) => peer.replaceStream(next));
     }
+
+    this.localStream?.getTracks().forEach((track) => track.stop());
+    this.localStream = next;
+    this.cameraStream = next;
+    this.config.audioDeviceId = audioDeviceId;
+    this.config.videoDeviceId = videoDeviceId;
+
+    return next;
+  }
+
+  async startScreenShare(): Promise<void> {
+    const screenStream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: false,
+    });
+
+    this.screenStream = screenStream;
+
+    // Browser's own "Stop sharing" button ends the track directly.
+    const videoTrack = screenStream.getVideoTracks()[0];
+    videoTrack?.addEventListener("ended", () => {
+      this.stopScreenShare().catch((err) => {
+        console.error("[P2PMediaProvider] Failed to clean up after external stop:", err);
+      });
+    });
+
+    this.peerConnections.forEach((peer) => peer.replaceStream(screenStream));
+
+    this.localScreenSharing = true;
+
+    const local = this.participants.get(this.config.localParticipantId);
+    if (local) {
+      local.isScreenSharing = true;
+    }
+
+    this.broadcastLocalState();
+
+    this.trackChangedCallbacks.forEach((callback) => {
+      callback({
+        participantId: this.config.localParticipantId,
+        track: "screen",
+        change: "started",
+      });
+    });
   }
 
   async stopScreenShare(): Promise<void> {
-    if (!this.localStream || !this.localScreenSharing) return;
+    if (!this.localScreenSharing) return;
 
-    // Restore original camera stream
-    this.peerConnections.forEach((peer) => {
-      peer.replaceStream(this.localStream!);
-    });
+    this.screenStream?.getTracks().forEach((track) => track.stop());
+    this.screenStream = null;
+
+    // Restore the camera track on every peer.
+    if (this.cameraStream) {
+      this.peerConnections.forEach((peer) => peer.replaceStream(this.cameraStream!));
+      this.localStream = this.cameraStream;
+    }
 
     this.localScreenSharing = false;
 
-    // Update local participant
     const local = this.participants.get(this.config.localParticipantId);
     if (local) {
       local.isScreenSharing = false;
     }
 
-    // Notify track change
+    this.broadcastLocalState();
+
     this.trackChangedCallbacks.forEach((callback) => {
       callback({
         participantId: this.config.localParticipantId,
@@ -249,6 +355,7 @@ export class P2PMediaProvider implements MediaProvider {
       });
     });
   }
+
 
   getParticipants(): CallParticipant[] {
     return Array.from(this.participants.values());
@@ -372,16 +479,27 @@ export class P2PMediaProvider implements MediaProvider {
   handleSignalEvent(event: SignalEvent): void {
     switch (event.type) {
       case "peer-joined":
-        this.handlePeerJoined(event.peerId);
+        this.handlePeerJoined(event.peerId, event.name);
+        break;
+      case "peer-ack":
+        // Directed reply — ignore acks meant for someone else.
+        if (event.to !== this.config.localParticipantId) return;
+        this.handlePeerAck(event.from, event.name);
         break;
       case "offer":
+        if (event.to !== this.config.localParticipantId) return;
         this.handleOffer(event.from, event.payload);
         break;
       case "answer":
+        if (event.to !== this.config.localParticipantId) return;
         this.handleAnswer(event.from, event.payload);
         break;
       case "ice-candidate":
+        if (event.to !== this.config.localParticipantId) return;
         this.handleIceCandidate(event.from, event.payload);
+        break;
+      case "peer-state":
+        this.handlePeerState(event.from, event);
         break;
       case "peer-left":
         this.handlePeerLeft(event.peerId);
@@ -403,67 +521,101 @@ export class P2PMediaProvider implements MediaProvider {
     return this.remoteStreams.get(participantId) || null;
   }
 
-  private handlePeerJoined(peerId: string): void {
-    // Don't connect to ourselves
+  private handlePeerJoined(peerId: string, name?: string): void {
     if (peerId === this.config.localParticipantId) return;
 
-    // Skip if already connected
-    if (this.peerConnections.has(peerId)) {
-      console.warn(`[P2PMediaProvider] Already connected to ${peerId}`);
-      return;
-    }
+    // Reply so the newcomer learns we exist. Without this ack the joiner has no
+    // idea who is already in the room and the mesh never forms.
+    this.config.onSignalEvent({
+      type: "peer-ack",
+      from: this.config.localParticipantId,
+      to: peerId,
+      name: this.config.localParticipantName,
+      isMicrophoneEnabled: this.localMicEnabled,
+      isCameraEnabled: this.localCameraEnabled,
+      isScreenSharing: this.localScreenSharing,
+    });
 
-    // Only initiate if our ID is lexicographically greater (prevents duplicate connections)
-    const shouldInitiate = this.config.localParticipantId > peerId;
+    this.ensurePeer(peerId, name);
+  }
+
+  private handlePeerAck(from: string, name?: string): void {
+    if (from === this.config.localParticipantId) return;
+    this.ensurePeer(from, name);
+  }
+
+  /**
+   * Create the peer connection for `peerId` if we don't already have one.
+   *
+   * Exactly one side initiates, chosen by comparing ids, so both peers agree on
+   * roles no matter which order the join/ack pair arrives in.
+   */
+  private ensurePeer(peerId: string, name?: string): PeerConnection | null {
+    this.upsertRemoteParticipant(peerId, name);
+
+    const existing = this.peerConnections.get(peerId);
+    if (existing) return existing;
 
     if (!this.localStream) {
-      console.warn("[P2PMediaProvider] No local stream to share");
-      return;
+      console.warn("[P2PMediaProvider] No local stream yet; deferring peer setup");
+      return null;
     }
 
-    // Create peer connection
+    const shouldInitiate = this.config.localParticipantId > peerId;
+
     const peer = new PeerConnection(peerId, {
       onSignal: (signal) => {
-        // simple-peer signal data structure
-        const isOffer = signal.type === "offer";
-        const isAnswer = signal.type === "answer";
+        const type =
+          signal?.type === "offer"
+            ? "offer"
+            : signal?.type === "answer"
+              ? "answer"
+              : "ice-candidate";
 
-        if (isOffer || isAnswer) {
-          // SDP offer/answer
-          this.config.onSignalEvent({
-            type: signal.type,
-            from: this.config.localParticipantId,
-            to: peerId,
-            payload: signal,
-          });
-        } else {
-          // ICE candidate
-          this.config.onSignalEvent({
-            type: "ice-candidate",
-            from: this.config.localParticipantId,
-            to: peerId,
-            payload: signal,
-          });
-        }
+        this.config.onSignalEvent({
+          type,
+          from: this.config.localParticipantId,
+          to: peerId,
+          payload: signal,
+        } as SignalEvent);
       },
       onStream: (stream) => {
         this.remoteStreams.set(peerId, stream);
+        this.config.onRemoteStream?.(peerId, stream);
 
-        // Add remote participant
-        const participant: CallParticipant = {
-          id: peerId,
-          name: `Peer ${peerId.slice(0, 8)}`,
-          isLocal: false,
-          isMicrophoneEnabled: stream.getAudioTracks().some((t) => t.enabled),
-          isCameraEnabled: stream.getVideoTracks().some((t) => t.enabled),
-          isScreenSharing: false,
-        };
+        const participant = this.upsertRemoteParticipant(peerId, name);
+        participant.isMicrophoneEnabled = stream.getAudioTracks().length > 0;
+        participant.isCameraEnabled = stream.getVideoTracks().length > 0;
 
-        this.participants.set(peerId, participant);
-        this.participantJoinedCallbacks.forEach((callback) => callback(participant));
+        // Remote mute/unmute arrives as track mute events, not renegotiation.
+        stream.getTracks().forEach((track) => {
+          const sync = () => {
+            const current = this.participants.get(peerId);
+            if (!current) return;
+            if (track.kind === "audio") current.isMicrophoneEnabled = !track.muted;
+            if (track.kind === "video") current.isCameraEnabled = !track.muted;
+            this.emitTrackChanged(peerId, track.kind === "audio" ? "audio" : "video");
+          };
+          track.addEventListener("mute", sync);
+          track.addEventListener("unmute", sync);
+        });
+
+        this.participantJoinedCallbacks.forEach((cb) => cb(participant));
       },
       onStateChange: (state) => {
-        console.log(`[P2PMediaProvider] Peer ${peerId} state: ${state}`);
+        const participant = this.participants.get(peerId);
+        if (participant) {
+          participant.connectionState =
+            state === "connected"
+              ? "connected"
+              : state === "reconnecting"
+                ? "reconnecting"
+                : state === "failed"
+                  ? "failed"
+                  : "connecting";
+          this.emitTrackChanged(peerId, "video");
+        }
+        if (state === "disconnected") this.handlePeerLeft(peerId);
       },
       onError: (error) => {
         console.error(`[P2PMediaProvider] Peer ${peerId} error:`, error);
@@ -478,48 +630,93 @@ export class P2PMediaProvider implements MediaProvider {
     } else {
       peer.receive(this.localStream);
     }
+
+    return peer;
+  }
+
+  private upsertRemoteParticipant(peerId: string, name?: string): CallParticipant {
+    const existing = this.participants.get(peerId);
+    if (existing) {
+      if (name) existing.name = name;
+      return existing;
+    }
+
+    const participant: CallParticipant = {
+      id: peerId,
+      name: name || "Guest",
+      isLocal: false,
+      isMicrophoneEnabled: true,
+      isCameraEnabled: true,
+      isScreenSharing: false,
+      connectionState: "connecting",
+    };
+    this.participants.set(peerId, participant);
+    this.participantJoinedCallbacks.forEach((cb) => cb(participant));
+    return participant;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private handleOffer(from: string, payload: any): void {
-    // Ignore offers from ourselves
     if (from === this.config.localParticipantId) return;
 
-    const peer = this.peerConnections.get(from);
-    if (!peer) {
-      console.warn(`[P2PMediaProvider] Received offer from unknown peer ${from}`);
-      return;
-    }
-
-    peer.handleSignal(payload);
+    // The offer may be the first thing we hear from this peer (our ack and
+    // their offer race). Create the receiving side on demand instead of
+    // dropping the offer, which used to deadlock the handshake.
+    const peer = this.peerConnections.get(from) ?? this.ensurePeer(from);
+    peer?.handleSignal(payload);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private handleAnswer(from: string, payload: any): void {
-    // Ignore answers from ourselves
     if (from === this.config.localParticipantId) return;
-
-    const peer = this.peerConnections.get(from);
-    if (!peer) {
-      console.warn(`[P2PMediaProvider] Received answer from unknown peer ${from}`);
-      return;
-    }
-
-    peer.handleSignal(payload);
+    this.peerConnections.get(from)?.handleSignal(payload);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private handleIceCandidate(from: string, payload: any): void {
-    // Ignore ICE candidates from ourselves
     if (from === this.config.localParticipantId) return;
 
-    const peer = this.peerConnections.get(from);
-    if (!peer) {
-      console.warn(`[P2PMediaProvider] Received ICE candidate from unknown peer ${from}`);
-      return;
-    }
+    // Candidates trickle in ahead of the offer; ensurePeer queues them.
+    const peer = this.peerConnections.get(from) ?? this.ensurePeer(from);
+    peer?.handleSignal(payload);
+  }
 
-    peer.handleSignal(payload);
+  private handlePeerState(
+    from: string,
+    state: {
+      isMicrophoneEnabled: boolean;
+      isCameraEnabled: boolean;
+      isScreenSharing: boolean;
+    },
+  ): void {
+    if (from === this.config.localParticipantId) return;
+
+    const participant = this.participants.get(from);
+    if (!participant) return;
+
+    participant.isMicrophoneEnabled = state.isMicrophoneEnabled;
+    participant.isCameraEnabled = state.isCameraEnabled;
+    participant.isScreenSharing = state.isScreenSharing;
+    this.emitTrackChanged(from, "audio");
+  }
+
+  private emitTrackChanged(
+    participantId: string,
+    track: "audio" | "video" | "screen",
+  ): void {
+    this.trackChangedCallbacks.forEach((cb) =>
+      cb({ participantId, track, change: "enabled" }),
+    );
+  }
+
+  private broadcastLocalState(): void {
+    this.config.onSignalEvent({
+      type: "peer-state",
+      from: this.config.localParticipantId,
+      isMicrophoneEnabled: this.localMicEnabled,
+      isCameraEnabled: this.localCameraEnabled,
+      isScreenSharing: this.localScreenSharing,
+    });
   }
 
   private handlePeerLeft(peerId: string): void {
