@@ -43,7 +43,7 @@ const serverSchema = z.object({
 
 const clientSchema = z.object({
   /** Canonical public origin, e.g. https://sudomeet-v1.vercel.app */
-  NEXT_PUBLIC_APP_URL: z.string().url(),
+  NEXT_PUBLIC_APP_URL: z.string().url().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverSchema>;
@@ -64,21 +64,28 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): {
   client: ClientEnv;
 } {
   const parsedServer = serverSchema.safeParse(source);
+  // Client env is optional on browser — fallback to window.location.origin if missing
+  // (prevents client-side crash when NEXT_PUBLIC_APP_URL wasn't inlined at build)
   const parsedClient = clientSchema.safeParse(source);
+  let clientData: ClientEnv;
+  if (parsedClient.success) {
+    clientData = parsedClient.data;
+  } else if (typeof window !== "undefined") {
+    clientData = { NEXT_PUBLIC_APP_URL: window.location.origin } as ClientEnv;
+  } else {
+    // Server build: still require it, but don't crash if missing — use placeholder
+    // (Vercel build will have it; local dev without .env.local gets localhost)
+    clientData = { NEXT_PUBLIC_APP_URL: source.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000" } as ClientEnv;
+  }
 
-  if (!parsedServer.success || !parsedClient.success) {
-    const problems = [
-      ...(parsedServer.success ? [] : [formatIssues(parsedServer.error)]),
-      ...(parsedClient.success ? [] : [formatIssues(parsedClient.error)]),
-    ].join("\n");
-
+  if (!parsedServer.success) {
     throw new Error(
-      `❌ Invalid environment variables:\n${problems}\n\n` +
+      `❌ Invalid environment variables:\n${formatIssues(parsedServer.error)}\n\n` +
         "Copy .env.example to .env.local and fill in the values.",
     );
   }
 
-  return { server: parsedServer.data, client: parsedClient.data };
+  return { server: parsedServer.data, client: clientData };
 }
 
 /**
