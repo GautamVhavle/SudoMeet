@@ -51,6 +51,24 @@ const SignalEventSchema = z.discriminatedUnion("type", [
     type: z.literal("peer-left"),
     peerId: z.string(),
   }),
+  z.object({
+    type: z.literal("reaction"),
+    participantId: z.string(),
+    participantName: z.string(),
+    emoji: z.enum(["👍", "❤️", "😂", "🎉", "👏"]),
+    timestamp: z.number(),
+  }),
+  z.object({
+    type: z.literal("presence-update"),
+    participantId: z.string(),
+    updates: z.object({
+      isMicrophoneEnabled: z.boolean().optional(),
+      isCameraEnabled: z.boolean().optional(),
+      isScreenSharing: z.boolean().optional(),
+      handRaised: z.boolean().optional(),
+      connectionState: z.enum(["connected", "reconnecting", "disconnected"]).optional(),
+    }),
+  }),
 ]);
 
 // Redis client (lazy-initialized)

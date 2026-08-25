@@ -2,42 +2,18 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
-
-interface Reaction {
-  id: string;
-  emoji: string;
-  participantId: string;
-  timestamp: Date;
-}
+import { useReactions } from "@/hooks/use-reactions";
 
 interface ReactionLayerProps {
-  reactions: Reaction[];
+  meetingId: string;
   className?: string;
 }
 
 export const ReactionLayer = React.forwardRef<
   HTMLDivElement,
   ReactionLayerProps
->(({ reactions, className }, ref) => {
-  const [visibleReactions, setVisibleReactions] = React.useState<Reaction[]>(
-    []
-  );
-
-  React.useEffect(() => {
-    // Add new reactions and auto-remove after 3 seconds
-    reactions.forEach((reaction) => {
-      setVisibleReactions((prev) => {
-        if (prev.some((r) => r.id === reaction.id)) return prev;
-        return [...prev, reaction];
-      });
-
-      setTimeout(() => {
-        setVisibleReactions((prev) =>
-          prev.filter((r) => r.id !== reaction.id)
-        );
-      }, 3000);
-    });
-  }, [reactions]);
+>(({ meetingId, className }, ref) => {
+  const { reactions } = useReactions(meetingId);
 
   return (
     <div
@@ -47,7 +23,7 @@ export const ReactionLayer = React.forwardRef<
         className
       )}
     >
-      {visibleReactions.map((reaction) => (
+      {reactions.map((reaction) => (
         <div
           key={reaction.id}
           className="absolute animate-[float_3s_ease-out_forwards] text-4xl"

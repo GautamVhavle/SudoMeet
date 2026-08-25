@@ -25,6 +25,10 @@ export default function CallPage() {
   const [showParticipants, setShowParticipants] = React.useState(false);
   const [showStats, setShowStats] = React.useState(false);
 
+  // Get meeting ID from room code (in real app, would fetch from API)
+  // For now, use roomCode as meetingId placeholder
+  const meetingId = params.roomCode as string;
+
   // Mock participants data (Phase 5)
   const mockParticipants = [
     {
@@ -96,14 +100,6 @@ export default function CallPage() {
     fps: 30,
   };
 
-  // Mock reactions
-  const reactions: Array<{
-    id: string;
-    emoji: string;
-    participantId: string;
-    timestamp: Date;
-  }> = [];
-
   const handleEndCall = () => {
     router.push(`/m/${params.roomCode}`);
   };
@@ -117,7 +113,7 @@ export default function CallPage() {
 
       <StatsOverlay stats={mockStats} isVisible={showStats} />
       
-      <ReactionLayer reactions={reactions} />
+      <ReactionLayer meetingId={meetingId} />
 
       {/* Main content area */}
       <div className="flex flex-1 overflow-hidden">
@@ -139,7 +135,7 @@ export default function CallPage() {
         {showParticipants && (
           <div className="w-80">
             <ParticipantPanel
-              participants={mockParticipants}
+              meetingId={meetingId}
               onPinParticipant={(id) => console.log("Pin:", id)}
               onRemoveParticipant={(id) => console.log("Remove:", id)}
             />

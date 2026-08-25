@@ -1,9 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { Mic, MicOff, Pin, MoreVertical } from "lucide-react";
+import { Mic, MicOff, MoreVertical, Hand } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
+import { Avatar, AvatarFallback } from "../ui/avatar";
 import { IconButton } from "../ui/icon-button";
 import {
   DropdownMenu,
@@ -12,19 +12,11 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { Badge } from "../ui/badge";
-
-interface Participant {
-  id: string;
-  name: string;
-  avatarUrl?: string;
-  isMuted?: boolean;
-  isSpeaking?: boolean;
-  isLocal?: boolean;
-  isPinned?: boolean;
-}
+import { usePresence } from "@/hooks/use-presence";
+import { useParticipants } from "@/hooks/use-participants";
 
 interface ParticipantPanelProps {
-  participants: Participant[];
+  meetingId: string;
   onPinParticipant?: (id: string) => void;
   onRemoveParticipant?: (id: string) => void;
   className?: string;
@@ -33,7 +25,43 @@ interface ParticipantPanelProps {
 export const ParticipantPanel = React.forwardRef<
   HTMLDivElement,
   ParticipantPanelProps
->(({ participants, onPinParticipant, onRemoveParticipant, className }, ref) => {
+>(({ meetingId, onPinParticipant, onRemoveParticipant, className }, ref) => {
+  const { participantList: presenceList, localParticipantId } = usePresence(meetingId);
+  const { participantList, activeSpeakerId, isRoomLocked } = useParticipants();
+  const [pinnedIds, setPinnedIds] = React.useState<Set<string>>(new Set());
+
+  // Merge presence data with participant metadata
+  const participants = presenceList.map((presence) => {
+    const metadata = participantList.find((p) => p.id === presence.participantId);
+    return {
+      id: presence.participantId,
+      name: presence.displayName,
+      role: presence.role,
+      isMuted: !presence.isMicrophoneEnabled,
+      isCameraOn: presence.isCameraEnabled,
+      isScreenSharing: presence.isScreenSharing,
+      handRaised: presence.handRaised,
+      isSpeaking: metadata?.isSpeaking || false,
+      isActiveSpeaker: activeSpeakerId === presence.participantId,
+      connectionState: presence.connectionState,
+      isLocal: presence.participantId === localParticipantId,
+      isPinned: pinnedIds.has(presence.participantId),
+    };
+  });
+
+  const handlePin = (id: string) => {
+    setPinnedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+    onPinParticipant?.(id);
+  };
+
   const initials = (name: string) =>
     name
       .split(" ")
@@ -51,9 +79,16 @@ export const ParticipantPanel = React.forwardRef<
       )}
     >
       <div className="border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold">
-          Participants ({participants.length})
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">
+            Participants ({participants.length})
+          </h2>
+          {isRoomLocked && (
+            <Badge variant="default" className="text-xs">
+              Locked
+            </Badge>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-2">
@@ -62,21 +97,26 @@ export const ParticipantPanel = React.forwardRef<
             key={participant.id}
             className={cn(
               "group flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-background-subtle",
-              participant.isSpeaking && "bg-accent/5"
+              participant.isActiveSpeaker && "bg-accent/10 ring-1 ring-accent/20"
             )}
           >
             <Avatar className="h-8 w-8">
-              <AvatarImage src={participant.avatarUrl} alt={participant.name} />
               <AvatarFallback className="text-xs">
                 {initials(participant.name)}
               </AvatarFallback>
             </Avatar>
 
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">
-                {participant.name}
-                {participant.isLocal && " (You)"}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium truncate">
+                  {participant.name}
+                </p>
+                {participant.role === "host" && (
+                  <Badge variant="default" className="text-xs">
+                    Host
+                  </Badge>
+                )}
+              </div>
               {participant.isSpeaking && (
                 <Badge variant="accent" className="text-xs mt-1">
                   Speaking
@@ -85,14 +125,14 @@ export const ParticipantPanel = React.forwardRef<
             </div>
 
             <div className="flex items-center gap-1">
+              {participant.handRaised && (
+                <Hand className="h-4 w-4 text-warning fill-warning/20" />
+              )}
+
               {participant.isMuted ? (
                 <MicOff className="h-4 w-4 text-destructive" />
               ) : (
                 <Mic className="h-4 w-4 text-success" />
-              )}
-
-              {participant.isPinned && (
-                <Pin className="h-4 w-4 text-accent" />
               )}
 
               <DropdownMenu>
@@ -107,7 +147,7 @@ export const ParticipantPanel = React.forwardRef<
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
-                    onClick={() => onPinParticipant?.(participant.id)}
+                    onClick={() => handlePin(participant.id)}
                   >
                     {participant.isPinned ? "Unpin" : "Pin"} participant
                   </DropdownMenuItem>
