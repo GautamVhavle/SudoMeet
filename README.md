@@ -53,6 +53,57 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## Authentication (Phase 3)
+
+SudoMeet uses Auth.js v5 (`next-auth@beta`) with the Prisma adapter and
+**database sessions**. The app builds and boots without any OAuth/SMTP
+credentials — providers activate as their env vars appear.
+
+### GitHub OAuth setup
+
+1. Go to <https://github.com/settings/developers> → **OAuth Apps** → **New
+   OAuth App**.
+2. Fill in:
+   - **Application name**: `SudoMeet` (or `SudoMeet dev`)
+   - **Homepage URL**: `http://localhost:3000`
+   - **Authorization callback URL**:
+     `http://localhost:3000/api/auth/callback/github`
+3. Register, then copy the **Client ID** and generate a **Client Secret**.
+4. Add them to `.env`:
+
+   ```bash
+   AUTH_GITHUB_ID=<client id>
+   AUTH_GITHUB_SECRET=<client secret>
+   ```
+
+5. Restart the dev server — the "Continue with GitHub" button appears on
+   `/login` and `GET /api/auth/providers` now lists the provider.
+
+For production, create a second OAuth app whose callback URL points at the
+deployed origin (e.g. `https://sudomeet.vercel.app/api/auth/callback/github`)
+and set the same vars in Vercel's project settings.
+
+### Magic links
+
+The email provider is always available. In development without SMTP, the
+sign-in URL is logged to the terminal:
+
+```text
+[sudomeet:auth]  MAGIC LINK (dev mode — no SMTP configured)
+[sudomeet:auth]  url: http://localhost:3000/api/auth/callback/email-link?token=…
+```
+
+Open that URL in the same browser to sign in. For real email delivery set
+`EMAIL_SERVER_HOST`, `EMAIL_SERVER_PORT`, `EMAIL_SERVER_USER`,
+`EMAIL_SERVER_PASSWORD`, and `EMAIL_FROM`.
+
+### Guest identity
+
+No auth required: unauthenticated visitors submit a display name (2–32 chars)
+to `POST /api/auth/guest` and receive a transient guest identity. Guests can
+never hold host privileges — host status is always derived from an
+authenticated session matched against `meeting.hostId`.
+
 ## Scripts
 
 | Command                | What it does                 |

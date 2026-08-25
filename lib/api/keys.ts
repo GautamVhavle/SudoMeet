@@ -59,10 +59,7 @@ export function generateApiKey(): GeneratedApiKey {
  * Verify a presented raw key against a stored hash.
  * Timing-safe comparison; returns false on any mismatch or malformed input.
  */
-export function verifyApiKey(
-  presentedKey: string,
-  storedHashedSecret: string,
-): boolean {
+export function verifyApiKey(presentedKey: string, storedHashedSecret: string): boolean {
   if (!presentedKey.startsWith(`${API_KEY_PREFIX}_`)) return false;
 
   const presentedHash = Buffer.from(hashApiKey(presentedKey), "hex");

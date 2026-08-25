@@ -18,12 +18,7 @@ import { Redis } from "@upstash/redis";
 
 import { env } from "@/lib/env";
 
-export type MeetingNamespace =
-  | "presence"
-  | "signal"
-  | "events"
-  | "chat"
-  | "reactions";
+export type MeetingNamespace = "presence" | "signal" | "events" | "chat" | "reactions";
 
 const NAMESPACES: readonly MeetingNamespace[] = [
   "presence",
@@ -45,10 +40,7 @@ export function redisKey(
 }
 
 /** Pub/sub channel name for a namespace (same shape as keys). */
-export function pubsubChannel(
-  namespace: MeetingNamespace,
-  meetingId: string,
-): string {
+export function pubsubChannel(namespace: MeetingNamespace, meetingId: string): string {
   return redisKey(namespace, meetingId);
 }
 
@@ -61,10 +53,7 @@ let client: Redis | undefined;
 
 function getRedisClient(): Redis {
   if (!client) {
-    if (
-      !env.server.UPSTASH_REDIS_REST_URL ||
-      !env.server.UPSTASH_REDIS_REST_TOKEN
-    ) {
+    if (!env.server.UPSTASH_REDIS_REST_URL || !env.server.UPSTASH_REDIS_REST_TOKEN) {
       throw new Error(
         "❌ Missing UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN. " +
           "Redis-backed features are unavailable until these are set.",
@@ -96,7 +85,7 @@ export function getMeetingRedis(meetingId: string) {
 
     // ── presence TTL heartbeats ─────────────────────────────────────────────
 
-        /** Record/refresh a participant's presence with a TTL heartbeat. */
+    /** Record/refresh a participant's presence with a TTL heartbeat. */
     async setPresence(userId: string, ttlSeconds: number): Promise<number> {
       const result = await getRedisClient().set(
         redisKey("presence", meetingId, userId),
@@ -158,10 +147,7 @@ export function getMeetingRedis(meetingId: string) {
       options?: { ttlSeconds?: number },
     ): Promise<number> {
       const listKey = redisKey("chat", meetingId);
-      const length = await getRedisClient().rpush(
-        listKey,
-        JSON.stringify(message),
-      );
+      const length = await getRedisClient().rpush(listKey, JSON.stringify(message));
       if (options?.ttlSeconds !== undefined) {
         await getRedisClient().expire(listKey, options.ttlSeconds);
       }

@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-  isMeetingNamespace,
-  pubsubChannel,
-  redisKey,
-} from "../../lib/redis";
+import { isMeetingNamespace, pubsubChannel, redisKey } from "../../lib/redis";
 
 describe("redisKey", () => {
   it("builds namespace:meetingId keys", () => {
@@ -21,10 +17,7 @@ describe("redisKey", () => {
   });
 
   it("keeps namespaces isolated per meeting", () => {
-    assert.notEqual(
-      redisKey("chat", "meeting_a"),
-      redisKey("chat", "meeting_b"),
-    );
+    assert.notEqual(redisKey("chat", "meeting_a"), redisKey("chat", "meeting_b"));
   });
 });
 
