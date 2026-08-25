@@ -18,8 +18,14 @@ export default async function DashboardPage() {
   const identity = await getOrCreateIdentity();
   await ensureAnonymousUser(identity);
 
-  const personalRoom = await getOrCreatePersonalRoom(identity.id);
-  const allMeetings = await listMeetingsForUser(identity.id);
+  let personalRoom: Awaited<ReturnType<typeof getOrCreatePersonalRoom>> | null = null;
+  let allMeetings: Awaited<ReturnType<typeof listMeetingsForUser>> = [];
+  try {
+    personalRoom = await getOrCreatePersonalRoom(identity.id);
+    allMeetings = await listMeetingsForUser(identity.id);
+  } catch {
+    // DB not configured (e.g. Vercel without DATABASE_URL) — show empty state
+  }
 
   const upcoming = allMeetings.filter((m) => m.status === "SCHEDULED");
   const active = allMeetings.filter((m) => m.status === "ACTIVE" || m.status === "WAITING");
@@ -48,16 +54,18 @@ export default async function DashboardPage() {
           <p className="mb-4 text-sm text-muted-foreground">
             Your stable room for quick calls — always the same link.
           </p>
-          <div className="flex items-center gap-3">
-            <code className="flex-1 rounded-xl border border-border bg-background-subtle px-4 py-3 font-mono text-sm text-foreground">
-              /m/{personalRoom.roomCode}
-            </code>
-            <Button asChild>
-              <Link href={`/m/${personalRoom.roomCode}`}>
-                Join
-              </Link>
-            </Button>
-          </div>
+          {personalRoom ? (
+            <div className="flex items-center gap-3">
+              <code className="flex-1 rounded-xl border border-border bg-background-subtle px-4 py-3 font-mono text-sm text-foreground">
+                /m/{personalRoom.roomCode}
+              </code>
+              <Button asChild>
+                <Link href={`/m/${personalRoom.roomCode}`}>Join</Link>
+              </Button>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Database not configured — personal room unavailable.</p>
+          )}
         </section>
 
         {/* Quick Start + Join by Code */}
