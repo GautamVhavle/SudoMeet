@@ -10,9 +10,13 @@ export { useParticipantsStore } from "./participants";
 export { useReactionsStore, sendReaction } from "./reactions";
 export { useChatStore } from "./chat";
 export { useLayoutStore, getSpotlightParticipant } from "./layout";
+export { useRecordingStore } from "./recording";
+export { useBreakoutStore } from "./breakout";
 
 export type { PresenceData } from "@/lib/redis/presence";
 export type { ParticipantMetadata } from "./participants";
 export type { Reaction, ReactionEmoji } from "./reactions";
 export type { ChatMessage } from "./chat";
 export type { LayoutMode } from "./layout";
+export type { RecordingState } from "./recording";
+export type { BreakoutState } from "./breakout";
