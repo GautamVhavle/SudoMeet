@@ -79,7 +79,15 @@ export async function handleGuestJoin(request: Request): Promise<Response> {
     return Response.json({ error: result.error }, { status: 422 });
   }
 
-  // Phase 4/6 will persist this in an httpOnly cookie scoped to the meeting;
-  // returning it in the response keeps this phase storage-design-only.
-  return Response.json({ identity: result.identity }, { status: 201 });
+  // Phase 6: persist guest identity in httpOnly cookie
+  const cookieValue = JSON.stringify(result.identity);
+  const maxAge = 60 * 60 * 24; // 24 hours
+
+  const response = Response.json({ identity: result.identity }, { status: 201 });
+  response.headers.set(
+    "Set-Cookie",
+    `sudomeet_guest=${encodeURIComponent(cookieValue)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`
+  );
+
+  return response;
 }
