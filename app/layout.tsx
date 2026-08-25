@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist_Mono, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
 import { CommandPalette } from "@/components/command-palette";
 
@@ -43,9 +44,11 @@ export default function RootLayout({
       <body
         className={`${geistMono.variable} min-h-screen bg-background font-sans antialiased`}
       >
-        {children}
-        <Toaster />
-        <CommandPalette />
+        <TooltipProvider>
+          {children}
+          <Toaster />
+          <CommandPalette />
+        </TooltipProvider>
       </body>
     </html>
   );

@@ -11,7 +11,7 @@ import type { ChatMessage } from "@/stores/chat";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 
 interface ChatPanelProps {
   meetingId: string;
@@ -219,20 +219,22 @@ function MessageItem({ message, isCurrentUser, onRetry }: MessageItemProps) {
             <span className="text-xs text-muted-foreground">Sending...</span>
           )}
           {message.status === "failed" && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => onRetry(message)}
-                  className="text-xs text-destructive hover:underline flex items-center gap-1"
-                >
-                  <RefreshCw className="h-3 w-3" />
-                  Failed - Retry
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p className="text-xs">Click to resend</p>
-              </TooltipContent>
-            </Tooltip>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => onRetry(message)}
+                    className="text-xs text-destructive hover:underline flex items-center gap-1"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Failed - Retry
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-xs">Click to resend</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </div>
 

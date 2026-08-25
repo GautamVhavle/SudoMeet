@@ -27,17 +27,24 @@ interface RouteContext {
  */
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
-    const { meetingId } = await context.params;
+    const { meetingId: rawId } = await context.params;
 
-    // Verify meeting exists
-    const meeting = await prisma.meeting.findUnique({
-      where: { id: meetingId },
+    // Accept both DB id and roomCode (call page passes roomCode)
+    let meeting = await prisma.meeting.findUnique({
+      where: { id: rawId },
       select: { id: true },
     });
+    if (!meeting) {
+      meeting = await prisma.meeting.findUnique({
+        where: { roomCode: rawId },
+        select: { id: true },
+      });
+    }
 
     if (!meeting) {
       return NextResponse.json({ error: "Meeting not found" }, { status: 404 });
     }
+    const meetingId = meeting.id;
 
     // Parse query params
     const { searchParams } = new URL(request.url);
@@ -81,17 +88,24 @@ export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const identity = await getOrCreateIdentity();
     await ensureAnonymousUser(identity);
-    const { meetingId } = await context.params;
+    const { meetingId: rawId } = await context.params;
 
-    // Verify meeting exists and is active
-    const meeting = await prisma.meeting.findUnique({
-      where: { id: meetingId },
+    // Accept both DB id and roomCode
+    let meeting = await prisma.meeting.findUnique({
+      where: { id: rawId },
       select: { id: true, status: true },
     });
+    if (!meeting) {
+      meeting = await prisma.meeting.findUnique({
+        where: { roomCode: rawId },
+        select: { id: true, status: true },
+      });
+    }
 
     if (!meeting) {
       return NextResponse.json({ error: "Meeting not found" }, { status: 404 });
     }
+    const meetingId = meeting.id;
 
     if (meeting.status !== "ACTIVE" && meeting.status !== "WAITING") {
       return NextResponse.json(
