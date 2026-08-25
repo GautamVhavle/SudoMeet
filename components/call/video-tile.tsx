@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { MicOff, VideoOff } from "lucide-react";
+import { MicOff, VideoOff, MonitorUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { Badge } from "../ui/badge";
@@ -14,6 +14,7 @@ interface VideoTileProps {
   isMuted?: boolean;
   isVideoOff?: boolean;
   isLocal?: boolean;
+  isScreenSharing?: boolean;
   /** Mock video element or null for Phase 5; real MediaStream in Phase 6+ */
   srcObject?: MediaStream | null;
   className?: string;
@@ -29,6 +30,7 @@ export const VideoTile = React.forwardRef<HTMLDivElement, VideoTileProps>(
       isMuted = false,
       isVideoOff = false,
       isLocal = false,
+      isScreenSharing = false,
       srcObject,
       className,
     },
@@ -95,16 +97,22 @@ export const VideoTile = React.forwardRef<HTMLDivElement, VideoTileProps>(
                   Speaking
                 </Badge>
               )}
+              {isScreenSharing && (
+                <Badge variant="secondary" className="text-xs flex items-center gap-1">
+                  <MonitorUp className="h-3 w-3" />
+                  Presenting
+                </Badge>
+              )}
             </div>
             <div className="flex items-center gap-1">
               {isMuted && (
-                <div className="rounded-lg bg-destructive/20 p-1">
-                  <MicOff className="h-3 w-3 text-destructive" />
+                <div className="rounded-full bg-destructive/90 p-1.5">
+                  <MicOff className="h-3 w-3 text-white" />
                 </div>
               )}
               {isVideoOff && (
-                <div className="rounded-lg bg-destructive/20 p-1">
-                  <VideoOff className="h-3 w-3 text-destructive" />
+                <div className="rounded-full bg-muted/90 p-1.5">
+                  <VideoOff className="h-3 w-3 text-white" />
                 </div>
               )}
             </div>
@@ -115,3 +123,4 @@ export const VideoTile = React.forwardRef<HTMLDivElement, VideoTileProps>(
   }
 );
 VideoTile.displayName = "VideoTile";
+

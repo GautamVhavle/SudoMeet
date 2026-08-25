@@ -181,7 +181,21 @@ export class P2PMediaProvider implements MediaProvider {
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
+        // Request system audio where supported (Chrome/Edge)
+        // @ts-expect-error - displaySurface is non-standard but supported in Chrome/Edge
+        audio: { suppressLocalAudioPlayback: false },
       });
+
+      // Listen for external stop (user clicks browser's "Stop sharing" button)
+      const videoTrack = screenStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.addEventListener("ended", () => {
+          // Browser stopped sharing externally, clean up
+          this.stopScreenShare().catch((err) => {
+            console.error("[P2PMediaProvider] Failed to clean up after external stop:", err);
+          });
+        });
+      }
 
       // Replace video track in all peer connections
       this.peerConnections.forEach((peer) => {
@@ -211,7 +225,7 @@ export class P2PMediaProvider implements MediaProvider {
   }
 
   async stopScreenShare(): Promise<void> {
-    if (!this.localStream) return;
+    if (!this.localStream || !this.localScreenSharing) return;
 
     // Restore original camera stream
     this.peerConnections.forEach((peer) => {
