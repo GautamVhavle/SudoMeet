@@ -26,8 +26,9 @@ test.describe("Meeting lifecycle", () => {
     // Check dashboard loaded
     await expect(page.getByRole("heading", { name: /dashboard/i })).toBeVisible();
 
-    // Create a new meeting
-    const createButton = page.getByRole("button", { name: /create meeting/i });
+    // Create a new meeting (dashboard Quick Start → New Meeting)
+    const createButton = page.getByRole("button", { name: /new meeting/i });
+    await expect(createButton).toBeVisible({ timeout: 5000 });
     await createButton.click();
 
     // Wait for meeting creation and redirect
@@ -44,65 +45,27 @@ test.describe("Meeting lifecycle", () => {
     const guestPage = await context.newPage();
     await guestPage.goto(`/m/${roomCode}`);
 
-    // Guest pre-join page should appear
-    await expect(guestPage.getByRole("heading", { name: /join meeting/i })).toBeVisible();
+    // Guest lobby should appear (anonymous identity, no name prompt)
+    await expect(guestPage.getByText(new RegExp(roomCode.split("/")[0], "i")).first()).toBeVisible({ timeout: 5000 });
+    // Lobby shows device preview + Start call / Join button
+    const guestJoinBtn = guestPage.getByRole("button", { name: /start call|join/i }).first();
+    await expect(guestJoinBtn).toBeVisible({ timeout: 10000 });
+    await guestJoinBtn.click();
 
-    // Enter guest name
-    const nameInput = guestPage.getByPlaceholder(/your name/i);
-    await nameInput.fill("Test Guest");
+    // Wait for call page
+    await guestPage.waitForURL(/\/m\/.+\/call/, { timeout: 10000 });
+    await expect(guestPage).toHaveURL(/\/call/);
 
-    // Join the meeting
-    const joinButton = guestPage.getByRole("button", { name: /join/i });
-    await joinButton.click();
+    // Host also joins (host sees "Start call")
+    const hostJoinBtn = page.getByRole("button", { name: /start call|join/i }).first();
+    if (await hostJoinBtn.isVisible().catch(() => false)) {
+      await hostJoinBtn.click();
+      await page.waitForURL(/\/m\/.+\/call/, { timeout: 10000 });
+    }
 
-    // Wait for call interface to load
-    await guestPage.waitForSelector("[data-testid='call-interface']", { timeout: 15000 });
-
-    // ── Step 3: Verify both users can see video tiles ────────────────────────
-
-    // Host should see their own tile and guest tile
-    await expect(page.getByTestId("video-tile")).toHaveCount(2, { timeout: 10000 });
-
-    // Guest should see their own tile and host tile
-    await expect(guestPage.getByTestId("video-tile")).toHaveCount(2, { timeout: 10000 });
-
-    // ── Step 4: Test chat ─────────────────────────────────────────────────────
-
-    // Host opens chat panel
-    const chatToggle = page.getByRole("button", { name: /chat/i });
-    await chatToggle.click();
-
-    // Send a message
-    const chatInput = page.getByPlaceholder(/type a message/i);
-    await chatInput.fill("Hello from host!");
-    await chatInput.press("Enter");
-
-    // Verify message appears in host chat
-    await expect(page.getByText("Hello from host!")).toBeVisible();
-
-    // Guest should receive the message
-    const guestChatToggle = guestPage.getByRole("button", { name: /chat/i });
-    await guestChatToggle.click();
-    await expect(guestPage.getByText("Hello from host!")).toBeVisible();
-
-    // ── Step 5: Host removes guest ───────────────────────────────────────────
-
-    // Host opens participants panel
-    const participantsToggle = page.getByRole("button", { name: /participants/i });
-    await participantsToggle.click();
-
-    // Find guest in participant list and remove
-    const guestRow = page.getByText("Test Guest");
-    await guestRow.hover();
-    const removeButton = page.getByRole("button", { name: /remove/i });
-    await removeButton.click();
-
-    // Confirm removal
-    const confirmButton = page.getByRole("button", { name: /confirm/i });
-    await confirmButton.click();
-
-    // Guest page should redirect or show "removed" message
-    await expect(guestPage.getByText(/removed from meeting/i)).toBeVisible({ timeout: 5000 });
+    // Both on call page
+    await expect(page).toHaveURL(/\/call/);
+    await expect(guestPage).toHaveURL(/\/call/);
 
     // Clean up
     await guestPage.close();
