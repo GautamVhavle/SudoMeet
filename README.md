@@ -149,9 +149,59 @@ Key decisions are recorded as ADRs:
 
 ## Deployment
 
-Production deploys to Vercel at **https://sudomeet-v1.vercel.app**. Set the
-environment variables from `.env.example` in the Vercel project settings.
+Production deployment: **https://sudomeet.vercel.app**
+
+### Quick Deploy to Vercel
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FGautamVhavle%2FSudoMeet)
+
+See [docs/deployment.md](docs/deployment.md) for complete deployment instructions
+(Vercel setup, environment variables, database migrations, GitHub OAuth
+configuration, etc.).
+
+### Self-Hosting
+
+Want to run SudoMeet on your own infrastructure? See
+[docs/self-hosting.md](docs/self-hosting.md) for Docker Compose deployment,
+LiveKit self-hosting, STUN/TURN server setup, and more.
+
+## Developer Platform
+
+SudoMeet includes a complete developer platform:
+
+- **Public API** — Create and manage meetings programmatically
+  ([docs/api.md](docs/api.md))
+- **Webhooks** — Real-time event notifications with HMAC signatures
+- **CLI** — `npx sudomeet meetings create "Team Sync"`
+- **Embed widget** — Iframe-embeddable meetings (`/embed/[roomCode]`)
+
+Generate an API key at [/settings/api-keys](https://sudomeet.vercel.app/settings/api-keys),
+then:
+
+```bash
+curl -H "Authorization: Bearer sudomeet_live_xxxxx" \
+     https://sudomeet.vercel.app/api/v1/meetings
+```
+
+See [docs/api.md](docs/api.md) for the complete API reference.
+
+## Documentation
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — System design and key abstractions
+- [docs/deployment.md](docs/deployment.md) — Production deployment guide
+- [docs/self-hosting.md](docs/self-hosting.md) — Self-hosting with Docker
+- [docs/api.md](docs/api.md) — Public API reference
+- [docs/developer-platform.md](docs/developer-platform.md) — API keys, webhooks, CLI, embed
+- [docs/adr/](docs/adr/) — Architecture decision records
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for
+guidelines.
+
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Security Policy](SECURITY.md)
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE)

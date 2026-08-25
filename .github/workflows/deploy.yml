@@ -1,0 +1,93 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Validate migrations and build
+    runs-on: ubuntu-latest
+
+    env:
+      NEXT_PUBLIC_APP_URL: https://sudomeet.vercel.app
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+      AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check for pending migrations
+        run: |
+          npx prisma migrate diff \
+            --from-schema-datamodel prisma/schema.prisma \
+            --to-schema-datasource prisma/schema.prisma \
+            --exit-code
+        continue-on-error: true
+        id: migration-check
+
+      - name: Warn if migrations pending
+        if: steps.migration-check.outcome == 'failure'
+        run: |
+          echo "⚠️ Warning: Database schema differs from migrations."
+          echo "Run 'npm run db:migrate' locally and commit the new migration."
+          exit 0
+
+      - name: Build
+        run: npm run build
+        env:
+          # Minimal env for build validation
+          NEXT_PUBLIC_APP_URL: https://sudomeet.vercel.app
+
+  deploy:
+    name: Deploy to Vercel
+    runs-on: ubuntu-latest
+    needs: validate
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod'
+
+  health-check:
+    name: Post-deployment health check
+    runs-on: ubuntu-latest
+    needs: deploy
+
+    steps:
+      - name: Wait for deployment
+        run: sleep 30
+
+      - name: Check status endpoint
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://sudomeet.vercel.app/api/status)
+          if [ $response -ne 200 ]; then
+            echo "❌ Health check failed: HTTP $response"
+            exit 1
+          fi
+          echo "✅ Health check passed: HTTP $response"
+
+      - name: Verify API providers
+        run: |
+          curl -s https://sudomeet.vercel.app/api/auth/providers | grep -q "github"
+          if [ $? -eq 0 ]; then
+            echo "✅ Auth providers configured"
+          else
+            echo "⚠️ Warning: GitHub OAuth not configured"
+          fi
