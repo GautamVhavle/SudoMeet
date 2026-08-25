@@ -22,15 +22,27 @@ if (typeof window !== "undefined") {
 }
 
 function createPrismaClient(): PrismaClient {
-  // Validates DATABASE_URL / DIRECT_DATABASE_URL presence with a clear error.
   getDbEnv();
   return new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 }
 
-export const prisma: PrismaClient = globalForPrisma.prisma ?? createPrismaClient();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+function getOrCreatePrismaClient(): PrismaClient {
+  if (globalForPrisma.prisma) return globalForPrisma.prisma;
+  const client = createPrismaClient();
+  if (process.env.NODE_ENV !== "production") {
+    globalForPrisma.prisma = client;
+  }
+  return client;
 }
+
+// Lazy proxy — does not call getDbEnv() at import time, only on first property access.
+// This prevents Vercel (without DATABASE_URL) from crashing on every page import.
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, prop) {
+    const client = getOrCreatePrismaClient();
+    const value = (client as unknown as Record<string, unknown>)[prop as string];
+    return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(client) : value;
+  },
+});
