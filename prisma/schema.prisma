@@ -1,0 +1,262 @@
+// ──────────────────────────────────────────────────────────────────────────────
+// SudoMeet — foundational schema (Phase 2)
+//
+// Conventions:
+// - Auth.js v5 compatible identity models (User/Account/Session/VerificationToken)
+//   with explicit FKs so relations survive provider swaps.
+// - Every Meeting-scoped model cascades from its parent so deleting a meeting
+//   never orphans rows.
+// - API keys NEVER store raw secrets — only a keyPrefix for lookup/display and
+//   a SHA-256 hashedSecret for verification.
+// - `directUrl` keeps Neon-compatible: runtime traffic uses the pooled
+//   DATABASE_URL, migrations use DIRECT_DATABASE_URL.
+// ──────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+// ── Identity (Auth.js v5 compatible) ─────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts       Account[]
+  sessions       Session[]
+  hostedMeetings Meeting[]       @relation("MeetingHost")
+  participations Participant[]
+  messages       ChatMessage[]
+  apiKeys        ApiKey[]
+  invitesSent    MeetingInvite[] @relation("InvitedBy")
+  auditEvents    AuditEvent[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ── Meetings ─────────────────────────────────────────────────────────────────
+
+/// Tier A uses the P2P provider (~4 participants); Tier B swaps in LiveKit SFU.
+enum MediaProvider {
+  P2P
+  LIVEKIT
+}
+
+enum MeetingStatus {
+  DRAFT
+  SCHEDULED
+  WAITING
+  ACTIVE
+  ENDED
+  EXPIRED
+}
+
+model Meeting {
+  id                   String        @id @default(cuid())
+  roomCode             String        @unique
+  slug                 String        @unique
+  title                String
+  hostId               String
+  mediaProvider        MediaProvider @default(P2P)
+  status               MeetingStatus @default(DRAFT)
+  isLocked             Boolean       @default(false)
+  requiresHostApproval Boolean       @default(false)
+  maxParticipants      Int           @default(4)
+  startedAt            DateTime?
+  endedAt              DateTime?
+  expiresAt            DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  host         User            @relation("MeetingHost", fields: [hostId], references: [id], onDelete: Cascade)
+  participants Participant[]
+  messages     ChatMessage[]
+  recordings   Recording[]
+  invites      MeetingInvite[]
+  auditEvents  AuditEvent[]
+
+  @@index([hostId])
+  @@index([status, startedAt(sort: Desc)])
+  @@index([expiresAt])
+}
+
+model Participant {
+  id          String    @id @default(cuid())
+  meetingId   String
+  userId      String?
+  displayName String
+  role        String    @default("guest") // host | guest
+  joinedAt    DateTime  @default(now())
+  leftAt      DateTime?
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([meetingId, userId])
+  @@index([meetingId, joinedAt])
+  @@index([userId])
+}
+
+model ChatMessage {
+  id        String    @id @default(cuid())
+  meetingId String
+  userId    String?
+  body      String
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([meetingId, createdAt])
+}
+
+model Recording {
+  id          String    @id @default(cuid())
+  meetingId   String
+  storageKey  String    @unique // R2 object key — never a raw URL with credentials
+  sizeBytes   BigInt?
+  durationSec Int?
+  startedAt   DateTime
+  endedAt     DateTime?
+  createdAt   DateTime  @default(now())
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@index([meetingId])
+}
+
+// ── Developer platform ───────────────────────────────────────────────────────
+
+/// API keys are stored hashed. `keyPrefix` (e.g. `sudomeet_live_ab12`) is the
+/// only plaintext fragment kept for lookup + UI display.
+model ApiKey {
+  id           String    @id @default(cuid())
+  userId       String
+  keyPrefix    String    @unique
+  hashedSecret String
+  label        String
+  lastUsedAt   DateTime?
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  webhookEndpoints WebhookEndpoint[]
+  auditEvents      AuditEvent[]
+
+  @@index([userId])
+}
+
+model WebhookEndpoint {
+  id        String   @id @default(cuid())
+  apiKeyId  String
+  url       String
+  secret    String // HMAC signing secret for payload signatures
+  events    String[] // e.g. ["meeting.started", "meeting.ended"]
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  apiKey        ApiKey         @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  webhookEvents WebhookEvent[]
+
+  @@index([apiKeyId])
+}
+
+model WebhookEvent {
+  id          String    @id @default(cuid())
+  endpointId  String
+  eventType   String
+  payload     Json
+  deliveredAt DateTime?
+  attempts    Int       @default(0)
+  lastError   String?
+  createdAt   DateTime  @default(now())
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId, createdAt])
+}
+
+model MeetingInvite {
+  id        String    @id @default(cuid())
+  meetingId String
+  invitedBy String
+  code      String    @unique
+  email     String?
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  inviter User    @relation("InvitedBy", fields: [invitedBy], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, email])
+  @@index([meetingId])
+}
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  actorId   String?
+  meetingId String?
+  apiKeyId  String?
+  action    String // e.g. "meeting.created", "api_key.revoked"
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  actor   User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  meeting Meeting? @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  apiKey  ApiKey?  @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([meetingId, createdAt])
+}

@@ -81,5 +81,45 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): {
   return { server: parsedServer.data, client: parsedClient.data };
 }
 
-/** Validated environment. Import this — never read process.env directly. */
+/**
+ * Validated environment. Import this — never read process.env directly.
+ *
+ * NOTE: Phase 2 made DATABASE_URL / DIRECT_DATABASE_URL lazily validated via
+ * getDbEnv() so that `npm run build` succeeds without any database configured
+ * (build-time code must not require a live DB). Server code that touches the
+ * database imports getDbEnv() (or the prisma singleton, which calls it) and
+ * fails fast with an actionable message when the vars are absent.
+ */
 export const env = validateEnv();
+
+// ── Lazy server-feature validation ───────────────────────────────────────────
+
+let dbEnvCache: { databaseUrl: string; directDatabaseUrl: string } | undefined;
+
+/**
+ * Validate + return the database connection env vars on first use.
+ * Throws a single aggregated error when either variable is missing so callers
+ * fail fast at request time instead of mid-query with an opaque Prisma error.
+ */
+export function getDbEnv(): {
+  databaseUrl: string;
+  directDatabaseUrl: string;
+} {
+  if (dbEnvCache) return dbEnvCache;
+
+  const required = ["DATABASE_URL", "DIRECT_DATABASE_URL"] as const;
+  const missing = required.filter((key) => !process.env[key]);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `❌ Missing required database environment variables: ${missing.join(", ")}\n` +
+        "Copy .env.example to .env and set DATABASE_URL / DIRECT_DATABASE_URL.",
+    );
+  }
+
+  dbEnvCache = {
+    databaseUrl: process.env.DATABASE_URL as string,
+    directDatabaseUrl: process.env.DIRECT_DATABASE_URL as string,
+  };
+  return dbEnvCache;
+}
