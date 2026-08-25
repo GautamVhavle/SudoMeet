@@ -63,34 +63,6 @@ export default function CallPage() {
     },
   ];
 
-  // Mock chat messages
-  const mockMessages = [
-    {
-      id: "1",
-      senderId: "2",
-      senderName: "Alice Johnson",
-      message: "Hey everyone! Great to be here.",
-      timestamp: new Date(Date.now() - 300000),
-      isLocal: false,
-    },
-    {
-      id: "2",
-      senderId: "1",
-      senderName: "You",
-      message: "Hi Alice! Thanks for joining.",
-      timestamp: new Date(Date.now() - 240000),
-      isLocal: true,
-    },
-    {
-      id: "3",
-      senderId: "3",
-      senderName: "Bob Smith",
-      message: "Can you all hear me okay?",
-      timestamp: new Date(Date.now() - 120000),
-      isLocal: false,
-    },
-  ];
-
   // Mock call stats
   const mockStats = {
     bitrate: "1.2 Mbps",
@@ -126,8 +98,12 @@ export default function CallPage() {
         {showChat && (
           <div className="w-80">
             <ChatPanel
-              messages={mockMessages}
-              onSendMessage={(msg) => console.log("Send:", msg)}
+              meetingId={meetingId}
+              currentUser={{
+                id: "1",
+                name: "You",
+                image: null,
+              }}
             />
           </div>
         )}
