@@ -25,6 +25,57 @@ export interface TrackChangedEvent {
 }
 
 /**
+ * WebRTC signaling events for Tier A P2P mesh.
+ * Relayed through Redis pub/sub via SSE signaling API.
+ *
+ * Payload types are `any` to accommodate simple-peer's internal SignalData structure.
+ */
+export type SignalEvent =
+  | {
+      type: "peer-joined";
+      peerId: string;
+    }
+  | {
+      type: "offer";
+      from: string;
+      to: string;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      payload: any;
+    }
+  | {
+      type: "answer";
+      from: string;
+      to: string;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      payload: any;
+    }
+  | {
+      type: "ice-candidate";
+      from: string;
+      to: string;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      payload: any;
+    }
+  | {
+      type: "peer-left";
+      peerId: string;
+    };
+
+/**
+ * Media state machine for connection lifecycle.
+ * Applies to both P2P and LiveKit providers.
+ */
+export type MediaState =
+  | "IDLE"
+  | "REQUESTING_MEDIA"
+  | "READY"
+  | "CONNECTING"
+  | "CONNECTED"
+  | "RECONNECTING"
+  | "DISCONNECTED"
+  | "FAILED";
+
+/**
  * Placeholder participant model (Phase 1).
  * Phases 7/11 extend this with connection quality, joined-at, permissions, etc.
  */

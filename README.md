@@ -1,4 +1,4 @@
-# SudoMeet
+-# SudoMeet
 
 Dark-mode-first video collaboration for developer teams. P2P calls, screen
 share, and chat — an open-source alternative to Google Meet that runs entirely
