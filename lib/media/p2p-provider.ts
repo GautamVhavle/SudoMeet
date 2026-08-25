@@ -40,6 +40,10 @@ export class P2PMediaProvider implements MediaProvider {
     return [];
   }
 
+  async getStats(): Promise<import("./types").WebRTCStats> {
+    return {};
+  }
+
   onParticipantJoined(_callback: ParticipantCallback): () => void {
     return () => {};
   }

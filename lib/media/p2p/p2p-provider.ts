@@ -270,6 +270,103 @@ export class P2PMediaProvider implements MediaProvider {
   }
 
   /**
+   * Get WebRTC statistics for the stats overlay (Phase 14).
+   * Aggregates stats from all active peer connections.
+   */
+  async getStats(): Promise<import("@/lib/media/types").WebRTCStats> {
+    const stats: import("@/lib/media/types").WebRTCStats = {};
+
+    // Get stats from first active peer connection
+    const activePeer = Array.from(this.peerConnections.values())[0];
+    if (!activePeer) return stats;
+
+    const report = await activePeer.getStats();
+    if (!report) return stats;
+
+    let totalBitrate = 0;
+    let totalPacketLoss = 0;
+    let maxRtt = 0;
+    let codec = "";
+    let resolution = "";
+    let fps = 0;
+    let connectionType = "";
+
+    // Parse RTCStatsReport
+    report.forEach((stat) => {
+      // Inbound RTP (receiving)
+      if (stat.type === "inbound-rtp" && stat.mediaType === "video") {
+        // Calculate bitrate
+        if (stat.bytesReceived && stat.timestamp) {
+          totalBitrate += (stat.bytesReceived * 8) / 1000000; // Convert to Mbps
+        }
+
+        // Packet loss
+        if (stat.packetsLost && stat.packetsReceived) {
+          const total = stat.packetsLost + stat.packetsReceived;
+          totalPacketLoss += (stat.packetsLost / total) * 100;
+        }
+
+        // Codec
+        if (stat.codecId) {
+          const codecStat = report.get(stat.codecId);
+          if (codecStat && codecStat.mimeType) {
+            codec = codecStat.mimeType.split("/")[1] || "";
+          }
+        }
+
+        // Resolution & FPS
+        if (stat.frameWidth && stat.frameHeight) {
+          resolution = `${stat.frameWidth}×${stat.frameHeight}`;
+        }
+        if (stat.framesPerSecond) {
+          fps = stat.framesPerSecond;
+        }
+      }
+
+      // Candidate pair (connection type & RTT)
+      if (stat.type === "candidate-pair" && stat.state === "succeeded") {
+        if (stat.currentRoundTripTime) {
+          maxRtt = Math.max(maxRtt, stat.currentRoundTripTime * 1000); // Convert to ms
+        }
+
+        // Get local candidate for connection type
+        if (stat.localCandidateId) {
+          const localCandidate = report.get(stat.localCandidateId);
+          if (localCandidate && localCandidate.candidateType) {
+            connectionType = localCandidate.candidateType;
+          }
+        }
+      }
+    });
+
+    // Format stats
+    if (totalBitrate > 0) {
+      stats.bitrate = `${totalBitrate.toFixed(1)} Mbps`;
+    }
+    if (totalPacketLoss > 0) {
+      stats.packetLoss = `${totalPacketLoss.toFixed(2)}%`;
+    }
+    if (maxRtt > 0) {
+      stats.rtt = `${Math.round(maxRtt)}ms`;
+      stats.latency = `${Math.round(maxRtt)}ms`;
+    }
+    if (codec) {
+      stats.codec = codec;
+    }
+    if (resolution) {
+      stats.resolution = resolution;
+    }
+    if (fps > 0) {
+      stats.fps = fps;
+    }
+    if (connectionType) {
+      stats.connectionType = connectionType;
+    }
+
+    return stats;
+  }
+
+  /**
    * Handle incoming signaling events from other peers.
    */
   handleSignalEvent(event: SignalEvent): void {

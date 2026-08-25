@@ -40,6 +40,10 @@ export class LiveKitMediaProvider implements MediaProvider {
     return [];
   }
 
+  async getStats(): Promise<import("./types").WebRTCStats> {
+    return {};
+  }
+
   onParticipantJoined(_callback: ParticipantCallback): () => void {
     return () => {};
   }

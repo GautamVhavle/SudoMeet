@@ -95,6 +95,32 @@ export type ParticipantCallback = (participant: CallParticipant) => void;
 export type TrackChangedCallback = (event: TrackChangedEvent) => void;
 
 /**
+ * WebRTC connection statistics for observability overlay (Phase 14).
+ */
+export interface WebRTCStats {
+  /** Video/audio bitrate (e.g., "1.2 Mbps"). */
+  bitrate?: string;
+  /** Packet loss percentage (e.g., "0.5%"). */
+  packetLoss?: string;
+  /** Jitter in milliseconds (e.g., "12ms"). */
+  jitter?: string;
+  /** Round-trip time in milliseconds (e.g., "45ms"). */
+  rtt?: string;
+  /** Latency in milliseconds (alias for RTT, e.g., "45ms"). */
+  latency?: string;
+  /** Video codec being used (e.g., "VP8", "H264"). */
+  codec?: string;
+  /** Video resolution (e.g., "1280×720"). */
+  resolution?: string;
+  /** Frames per second (e.g., 30). */
+  fps?: number;
+  /** Connection type (e.g., "relay", "host", "srflx"). */
+  connectionType?: string;
+  /** SFU node identifier (LiveKit only). */
+  sfuNode?: string;
+}
+
+/**
  * The contract every media engine must fulfill. The call UI talks exclusively
  * to this interface — never to simple-peer or livekit-client directly.
  */
@@ -119,6 +145,9 @@ export interface MediaProvider {
 
   /** Snapshot of everyone currently in the call. */
   getParticipants(): CallParticipant[];
+
+  /** Get WebRTC statistics for the stats overlay (Phase 14). */
+  getStats(): Promise<WebRTCStats>;
 
   /** Subscribe to remote/local participants joining. Returns unsubscribe fn. */
   onParticipantJoined(callback: ParticipantCallback): () => void;

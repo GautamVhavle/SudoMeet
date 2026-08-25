@@ -291,6 +291,104 @@ export class LiveKitMediaProvider implements MediaProvider {
   }
 
   /**
+   * Get WebRTC statistics for the stats overlay (Phase 14).
+   * Uses LiveKit's built-in stats API.
+   */
+  async getStats(): Promise<import("@/lib/media/types").WebRTCStats> {
+    const stats: import("@/lib/media/types").WebRTCStats = {};
+
+    if (!this.room) return stats;
+
+    try {
+      // Get stats from local participant's first video track
+      const videoPublication = Array.from(
+        this.room.localParticipant.videoTrackPublications.values()
+      )[0];
+
+      if (videoPublication && videoPublication.track) {
+        const rtcStats = await videoPublication.track.getRTCStatsReport();
+        if (!rtcStats) return stats;
+
+        // Parse LiveKit stats (similar to P2P but from LiveKit's RTCStatsReport)
+        let totalBitrate = 0;
+        let totalPacketLoss = 0;
+        let maxRtt = 0;
+        let codec = "";
+        let resolution = "";
+        let fps = 0;
+
+        rtcStats.forEach((stat) => {
+          // Outbound RTP (sending to SFU)
+          if (stat.type === "outbound-rtp" && stat.mediaType === "video") {
+            if (stat.bytesSent && stat.timestamp) {
+              totalBitrate += (stat.bytesSent * 8) / 1000000; // Mbps
+            }
+
+            // Codec
+            if (stat.codecId) {
+              const codecStat = rtcStats.get(stat.codecId);
+              if (codecStat && codecStat.mimeType) {
+                codec = codecStat.mimeType.split("/")[1] || "";
+              }
+            }
+
+            // Resolution & FPS
+            if (stat.frameWidth && stat.frameHeight) {
+              resolution = `${stat.frameWidth}×${stat.frameHeight}`;
+            }
+            if (stat.framesPerSecond) {
+              fps = stat.framesPerSecond;
+            }
+          }
+
+          // Remote inbound (SFU feedback)
+          if (stat.type === "remote-inbound-rtp") {
+            if (stat.packetsLost !== undefined && stat.totalPacketsReceived) {
+              const total = stat.packetsLost + stat.totalPacketsReceived;
+              if (total > 0) {
+                totalPacketLoss = (stat.packetsLost / total) * 100;
+              }
+            }
+            if (stat.roundTripTime) {
+              maxRtt = Math.max(maxRtt, stat.roundTripTime * 1000); // ms
+            }
+          }
+        });
+
+        // Format stats
+        if (totalBitrate > 0) {
+          stats.bitrate = `${totalBitrate.toFixed(1)} Mbps`;
+        }
+        if (totalPacketLoss > 0) {
+          stats.packetLoss = `${totalPacketLoss.toFixed(2)}%`;
+        }
+        if (maxRtt > 0) {
+          stats.rtt = `${Math.round(maxRtt)}ms`;
+          stats.latency = `${Math.round(maxRtt)}ms`;
+        }
+        if (codec) {
+          stats.codec = codec;
+        }
+        if (resolution) {
+          stats.resolution = resolution;
+        }
+        if (fps > 0) {
+          stats.fps = fps;
+        }
+
+        // LiveKit-specific: connection type is always "relay" (SFU)
+        stats.connectionType = "relay";
+        // Note: LiveKit Room doesn't expose serverUrl directly; would need to track it from config
+        stats.sfuNode = this.config.livekitUrl;
+      }
+    } catch (error) {
+      console.error("[LiveKitMediaProvider] Failed to get stats:", error);
+    }
+
+    return stats;
+  }
+
+  /**
    * Get the LiveKit Room instance for advanced use cases.
    */
   getRoom(): Room | null {

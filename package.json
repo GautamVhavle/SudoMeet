@@ -15,6 +15,8 @@
     "db:seed": "tsx --env-file=.env prisma/seed.ts",
     "test": "npm run test:unit",
     "test:unit": "tsx --env-file=.env --test tests/unit/*.test.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "prepare": "husky"
   },
   "prisma": {
@@ -54,6 +56,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@playwright/test": "^1.51.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/nodemailer": "^8.0.1",

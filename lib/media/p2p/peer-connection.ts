@@ -109,6 +109,25 @@ export class PeerConnection {
     return this.state;
   }
 
+  /**
+   * Get WebRTC statistics from the underlying peer connection (Phase 14).
+   */
+  async getStats(): Promise<RTCStatsReport | null> {
+    if (!this.peer) return null;
+
+    try {
+      // Access the underlying RTCPeerConnection via simple-peer internal API
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pc = (this.peer as any)._pc as RTCPeerConnection | undefined;
+      if (!pc || pc.connectionState === "closed") return null;
+
+      return await pc.getStats();
+    } catch (error) {
+      console.error(`[PeerConnection] getStats error:`, error);
+      return null;
+    }
+  }
+
   private createPeer(initiator: boolean, stream: MediaStream): void {
     if (this.peer) {
       console.warn(`[PeerConnection] Peer already exists for ${this.remotePeerId}`);
