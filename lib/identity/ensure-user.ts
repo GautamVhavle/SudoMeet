@@ -7,7 +7,7 @@ import type { AnonymousIdentity } from "./index";
  */
 export async function ensureAnonymousUser(identity: AnonymousIdentity) {
   try {
-    await prisma.user.upsert({
+    await (prisma.user.upsert as unknown as (args: unknown) => Promise<unknown>)({
       where: { id: identity.id },
       update: { name: identity.displayName },
       create: {
