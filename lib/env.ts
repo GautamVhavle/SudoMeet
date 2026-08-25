@@ -123,3 +123,44 @@ export function getDbEnv(): {
   };
   return dbEnvCache;
 }
+
+let livekitEnvCache:
+  | {
+      livekitUrl: string;
+      livekitApiKey: string;
+      livekitApiSecret: string;
+    }
+  | undefined;
+
+/**
+ * Validate + return the LiveKit connection env vars on first use.
+ * Throws when any variable is missing so LiveKit features fail fast at request
+ * time with an actionable message instead of mid-call with an opaque error.
+ *
+ * Phase 11 adds LiveKit as Tier B media provider. If credentials are missing,
+ * meetings should fall back to P2P or return a 503 from the token endpoint.
+ */
+export function getLiveKitEnv(): {
+  livekitUrl: string;
+  livekitApiKey: string;
+  livekitApiSecret: string;
+} {
+  if (livekitEnvCache) return livekitEnvCache;
+
+  const required = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"] as const;
+  const missing = required.filter((key) => !process.env[key]);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `❌ Missing required LiveKit credentials: ${missing.join(", ")}\n` +
+        "LiveKit features are unavailable. Use P2P mode or configure LiveKit env vars.",
+    );
+  }
+
+  livekitEnvCache = {
+    livekitUrl: process.env.LIVEKIT_URL as string,
+    livekitApiKey: process.env.LIVEKIT_API_KEY as string,
+    livekitApiSecret: process.env.LIVEKIT_API_SECRET as string,
+  };
+  return livekitEnvCache;
+}
